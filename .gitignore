@@ -1,0 +1,44 @@
+# Python (Backend)
+backend/*.pyc
+backend/__pycache__/
+backend/env/
+backend/venv/
+backend/.venv/
+backend/*.env
+backend/*.log
+backend/*.sqlite3
+backend/db.sqlite3
+backend/instance/
+backend/.vscode/
+
+# Node (Frontend)
+frontend/ai-recruiter-frontend/node_modules/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/.pnpm-debug.log*
+frontend/package-lock.json
+frontend/yarn.lock
+frontend/pnpm-lock.yaml
+frontend/build/
+frontend/dist/
+frontend/coverage/
+
+# Logs
+logs/
+*.log
+
+# Environment variables
+*.env
+
+# MacOS specific
+.DS_Store
+
+# IDE specific
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# VS Code specific
+.vscode/
