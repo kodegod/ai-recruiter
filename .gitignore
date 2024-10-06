@@ -10,6 +10,8 @@ backend/*.sqlite3
 backend/db.sqlite3
 backend/instance/
 backend/.vscode/
+backend/temp/
+
 
 # Node (Frontend)
 frontend/ai-recruiter-frontend/node_modules/
