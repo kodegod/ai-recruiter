@@ -123,6 +123,16 @@ h2 {
   color: #61dafb;
 }
 
+.CandidateNameInput {
+  margin-bottom: 20px;
+}
+
+.CandidateNameInput input {
+  padding: 10px;
+  font-size: 16px;
+  width: 200px;
+}
+
 @keyframes App-logo-spin {
   from {
     transform: rotate(0deg);
@@ -132,3 +142,11 @@ h2 {
   }
 }
 
+.ErrorMessage {
+  color: red;
+  background-color: #ffebee;
+  border: 1px solid red;
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 4px;
+}
