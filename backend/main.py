@@ -6,7 +6,6 @@ from groq import Groq
 import json
 import requests
 from fastapi.middleware.cors import CORSMiddleware
-from audio_extract import extract_audio
 import uuid
 
 load_dotenv()
@@ -47,42 +46,6 @@ async def post_audio(file: UploadFile):
         yield audio_output
     return StreamingResponse(iterfile(), media_type='audio/mpeg')
 
-
-@app.post("/talk-video")
-async def post_video(file: UploadFile):
-    video_directory = "temp/"
-    if not os.path.exists(video_directory):
-        os.makedirs(video_directory)
-
-    # Save the uploaded webm video
-    webm_path = f"{video_directory}{file.filename}"
-    with open(webm_path, "wb") as video_file:
-        content = await file.read()
-        video_file.write(content)
-
-    # Generate a unique output audio path with a .wav extension
-    audio_path = f"{video_directory}audio_from_video_{uuid.uuid4()}.wav"
-    try:
-        # Extract audio in .wav format using audio-extract
-        extract_audio(input_path=webm_path, output_path=audio_path, output_format='wav', overwrite=True)
-    except Exception as e:
-        print(f"Error extracting audio using audio-extract: {e}")
-        return {"error": "Failed to extract audio from webm"}
-
-    # Transcribe the extracted audio
-    user_message = await transcribe_audio_from_video(audio_path)
-
-    # Get LLM response based on transcribed message
-    chat_response = get_chat_response(user_message)
-
-    # Convert response to audio
-    audio_output = text_to_speech(chat_response)
-
-    # Stream the response as an audio file
-    def iterfile():
-        yield audio_output
-    return StreamingResponse(iterfile(), media_type='audio/mpeg')
-
 async def transcribe_audio(file):
     file_content = await file.read()
     # Create a transcription of the audio file
@@ -95,23 +58,6 @@ async def transcribe_audio(file):
         temperature=0.0  # Optional
     )
     return transcription.text
-
-async def transcribe_audio_from_video(file_path):
-    # Open the audio file in binary mode
-    with open(file_path, "rb") as audio_file:
-        file_content = audio_file.read()
-
-    # Create a transcription of the audio file
-    transcription = client.audio.transcriptions.create(
-        file=("audio_from_video.wav", file_content),  # Required audio file
-        model="distil-whisper-large-v3-en",           # Required model to use for transcription
-        prompt="Specify context or spelling",         # Optional
-        response_format="json",                       # Optional
-        language="en",                                # Optional
-        temperature=0.0                               # Optional
-    )
-    return transcription.text
-
 
 def get_chat_response(user_message):
 
@@ -153,7 +99,7 @@ def load_messages(role):
             {
                 "role": "system",
                 "content": f"""
-You are ai-recruiter, an experienced interviewer conducting a preliminary interview for the role of {role}. Your goal is to
+Your name is A.I. Recruiter, an experienced interviewer conducting a preliminary interview for the role of {role}. Your goal is to
 assess the candidate's suitability for {role} role based on specific criteria, including their communication skills,
 relevant experience, and alignment with the company's values. You will ask a series of tailored questions to
 evaluate these aspects, encouraging the candidate to provide detailed responses. You will also observe non-verbal
