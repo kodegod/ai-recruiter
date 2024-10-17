@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import axios from "axios";
 import Webcam from "react-webcam";
+import { ReactMic } from "react-mic";
 import './App.css';
 
 function VideoInterview() {
@@ -11,91 +12,63 @@ function VideoInterview() {
   const [candidateName, setCandidateName] = useState('');
   const [error, setError] = useState(null);  // New error state
   const webcamRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const [capturedChunks, setCapturedChunks] = useState([]);
+  const [blob, setBlob] = useState(null); // Store the recorded audio blob
 
   const startRecording = () => {
     if (!candidateName.trim()) {
       alert("Please enter your name before starting the interview.");
       return;
     }
-    setCapturedChunks([]);
     setRecording(true);
-    mediaRecorderRef.current = new MediaRecorder(webcamRef.current.stream, {
-      mimeType: "video/webm",
-      audioBitsPerSecond: 128000,
-      videoBitsPerSecond: 2500000,
-    });
-    mediaRecorderRef.current.addEventListener("dataavailable", handleDataAvailable);
-    mediaRecorderRef.current.start();
+    setBlob(null); // Reset the previous blob
   };
 
   const stopRecording = () => {
-    mediaRecorderRef.current.stop();
     setRecording(false);
     setLoading(true);
   };
 
-  const handleDataAvailable = ({ data }) => {
-    if (data.size > 0) {
-      setCapturedChunks((prev) => prev.concat(data));
-    }
+  // On stop, handle the audio data
+  const onStop = (recordedBlob) => {
+    setBlob(recordedBlob); // Save the recorded audio blob
   };
 
-  const uploadVideo = useCallback(async () => {
-    const videoBlob = new Blob(capturedChunks, { type: "video/webm" });
-    const formData = new FormData();
-    formData.append("file", videoBlob, "user-video.webm");
-    formData.append("candidate_name", candidateName.trim() || "Anonymous");
-  
-    try {
-      console.log("Sending video to backend...");
-      const response = await axios.post(
-        "http://localhost:8000/talk-video",
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-          responseType: "arraybuffer",
-        }
-      );
-      
-      console.log("Received response from backend");
-      console.log("Response headers:", response.headers);
-      console.log("Response data length:", response.data.byteLength);
-  
-      if (response.headers['content-type'].includes('audio')) {
+  // Automatically upload audio after recording stops
+  const uploadAudio = useCallback(async () => {
+    if (blob) {
+      const formData = new FormData();
+      formData.append("file", blob.blob, "user-audio.wav");
+      formData.append("candidate_name", candidateName.trim() || "Anonymous");
+
+      try {
+        const response = await axios.post(
+          "http://localhost:8000/talk", // Update this to your backend URL
+          formData,
+          {
+            headers: {
+              "Content-Type": "multipart/form-data",
+            },
+            responseType: "arraybuffer",
+          }
+        );
+
         const audioBlob = new Blob([response.data], { type: "audio/mpeg" });
-        console.log("Created audio blob, size:", audioBlob.size);
         const audioURL = URL.createObjectURL(audioBlob);
-        console.log("Created audio URL:", audioURL);
         setVideoResponse(audioURL);
         setIsNewVideo(true);
-      } else {
-        console.error("Received non-audio response:", new TextDecoder().decode(response.data));
+      } catch (error) {
+        console.error("Error uploading the audio file:", error);
+      } finally {
+        setLoading(false);  // Stop loading animation when response is received
       }
-    } catch (error) {
-      console.error("Error uploading the video file:", error);
-      if (error.response) {
-        console.error("Response data:", new TextDecoder().decode(error.response.data));
-        console.error("Response status:", error.response.status);
-        console.error("Response headers:", error.response.headers);
-      } else if (error.request) {
-        console.error("No response received:", error.request);
-      } else {
-        console.error("Error setting up request:", error.message);
-      }
-    } finally {
-      setLoading(false);
     }
-  }, [capturedChunks, candidateName]);
+  }, [blob, candidateName]);
 
   useEffect(() => {
-    if (!recording && capturedChunks.length > 0) {
-      uploadVideo();
+    if (!recording && blob) {
+      uploadAudio();
     }
-  }, [recording, capturedChunks, uploadVideo]);
+  }, [recording, blob, uploadAudio]);
 
   const handleVideoPlay = () => {
     setIsNewVideo(false);
@@ -114,15 +87,20 @@ function VideoInterview() {
         />
       </div>
       <Webcam 
-        audio={true}
+        audio={false} // No audio here
         ref={webcamRef}
-        audioConstraints={{
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: false,
-          sampleRate: 16000
-        }}
       />
+
+      {/* React-Mic to record audio */}
+      <div style={{ width: 0, height: 0, overflow: 'hidden' }}>
+        <ReactMic
+          record={recording}
+          onStop={onStop}
+          mimeType="audio/wav"
+          visualize={false} // Disable the sound wave visualization
+        />
+      </div>  
+
       <div>
         <button onClick={startRecording} disabled={recording} className="Button">
           Start Recording

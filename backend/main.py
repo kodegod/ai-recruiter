@@ -1,5 +1,3 @@
-
-
 from fastapi import FastAPI, UploadFile, Depends, HTTPException, Query, File, Form
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.encoders import jsonable_encoder
@@ -14,7 +12,6 @@ from groq import Groq
 import json
 import requests
 from fastapi.middleware.cors import CORSMiddleware
-from audio_extract import extract_audio
 import uuid
 from typing import List
 import shutil
@@ -154,26 +151,20 @@ def get_interview_details(interview_id: int, db: Session = Depends(get_db)):
 
 @app.post("/talk")
 async def post_audio(file: UploadFile = File(...), candidate_name: str = Form(...), db: Session = Depends(get_db)):
-    logger.info(f"Received audio file for candidate: {candidate_name}")
     try:
         user_message = await transcribe_audio(file)
-        logger.info(f"Transcribed message: {user_message[:50]}...")
 
         chat_response, ai_question = get_chat_response(str(uuid.uuid4()), user_message, role)
-        logger.info(f"AI response: {chat_response[:50]}...")
-        logger.info(f"AI question: {ai_question}")
 
         candidate = db.query(Candidate).filter(Candidate.name == candidate_name).first()
         if not candidate:
             candidate = Candidate(name=candidate_name)
             db.add(candidate)
             db.flush()
-            logger.info(f"Created new candidate: {candidate_name}")
 
         interview = Interview(candidate_id=candidate.id)
         db.add(interview)
         db.flush()
-        logger.info(f"Created new interview for candidate: {candidate_name}")
 
         question = Question(
             interview_id=interview.id,
@@ -183,10 +174,8 @@ async def post_audio(file: UploadFile = File(...), candidate_name: str = Form(..
         )
         db.add(question)
         db.commit()
-        logger.info("Saved interview data to database")
 
         audio_output = text_to_speech(chat_response)
-        logger.info("Generated audio response")
 
         def iterfile():
             yield audio_output
@@ -194,88 +183,9 @@ async def post_audio(file: UploadFile = File(...), candidate_name: str = Form(..
 
     except SQLAlchemyError as e:
         db.rollback()
-        logger.error(f"Database error in post_audio: {str(e)}")
         return JSONResponse(status_code=500, content={"detail": f"Database error: {str(e)}"})
     except Exception as e:
-        logger.error(f"Error in post_audio: {str(e)}")
         return JSONResponse(status_code=500, content={"detail": f"An error occurred: {str(e)}"})
-
-@app.post("/talk-video")
-async def post_video(file: UploadFile = File(...), candidate_name: str = Form(...), db: Session = Depends(get_db)):
-    logger.info(f"Received video file: {file.filename}, Candidate name: {candidate_name}")
-    temp_dir = "temp/"
-    webm_path = ""
-    audio_path = ""
-    session_id = str(uuid.uuid4())
-    try:
-        if not candidate_name.strip():
-            raise HTTPException(status_code=400, detail="Candidate name cannot be empty")
-
-        os.makedirs(temp_dir, exist_ok=True)
-
-        webm_path = f"{temp_dir}{file.filename}"
-        with open(webm_path, "wb") as video_file:
-            content = await file.read()
-            video_file.write(content)
-        logger.info(f"Saved video file to {webm_path}")
-
-        audio_path = f"{temp_dir}audio_from_video_{uuid.uuid4()}.wav"
-        extract_audio(input_path=webm_path, output_path=audio_path, output_format='wav', overwrite=True)
-        logger.info(f"Extracted audio to {audio_path}")
-
-        user_message = await transcribe_audio_from_video(audio_path)
-        logger.info(f"Transcribed message: {user_message[:50]}...")
-
-        chat_response, ai_question = get_chat_response(session_id, user_message, role)
-        logger.info(f"AI response: {chat_response[:50]}...")
-        logger.info(f"AI question: {ai_question}")
-
-        candidate = db.query(Candidate).filter(Candidate.name == candidate_name).first()
-        if not candidate:
-            candidate = Candidate(name=candidate_name)
-            db.add(candidate)
-            db.flush()
-            logger.info(f"Created new candidate: {candidate_name}")
-        else:
-            logger.info(f"Found existing candidate: {candidate_name}")
-
-        interview = Interview(candidate_id=candidate.id, session_id=session_id)
-        db.add(interview)
-        db.flush()
-        logger.info(f"Created new interview for candidate: {candidate_name}")
-
-        question = Question(
-            interview_id=interview.id,
-            question_text=ai_question,
-            response=user_message,
-            score=calculate_score(user_message)
-        )
-        db.add(question)
-        db.commit()
-        logger.info("Saved interview data to database")
-
-        audio_output = text_to_speech(chat_response)
-        logger.info(f"Received audio output from text_to_speech, size: {len(audio_output)} bytes")
-
-        def iterfile():
-            yield audio_output
-        return StreamingResponse(iterfile(), media_type='audio/mpeg')
-
-    except SQLAlchemyError as e:
-        db.rollback()
-        logger.error(f"Database error in post_video: {str(e)}")
-        return JSONResponse(status_code=500, content={"detail": f"Database error: {str(e)}"})
-    except HTTPException as he:
-        return JSONResponse(status_code=he.status_code, content={"detail": he.detail})
-    except Exception as e:
-        logger.error(f"Error in post_video: {str(e)}")
-        return JSONResponse(status_code=500, content={"detail": f"An error occurred: {str(e)}"})
-    finally:
-        if webm_path and os.path.exists(webm_path):
-            os.remove(webm_path)
-        if audio_path and os.path.exists(audio_path):
-            os.remove(audio_path)
-        logger.info("Cleaned up temporary files")
 
 @app.get("/test-candidates")
 def test_candidates(db: Session = Depends(get_db)):
@@ -286,20 +196,6 @@ async def transcribe_audio(file):
     file_content = await file.read()
     transcription = client.audio.transcriptions.create(
         file=(file.filename, file_content),
-        model="distil-whisper-large-v3-en",
-        prompt="Specify context or spelling",
-        response_format="json",
-        language="en",
-        temperature=0.0
-    )
-    return transcription.text
-
-async def transcribe_audio_from_video(file_path):
-    with open(file_path, "rb") as audio_file:
-        file_content = audio_file.read()
-
-    transcription = client.audio.transcriptions.create(
-        file=("audio_from_video.wav", file_content),
         model="distil-whisper-large-v3-en",
         prompt="Specify context or spelling",
         response_format="json",
