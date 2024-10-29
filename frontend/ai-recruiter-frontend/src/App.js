@@ -1,26 +1,35 @@
-import React from "react";
-import { BrowserRouter as Router, Route, Routes, Link } from "react-router-dom";
-import VideoInterview from "./VideoInterview";
-import Dashboard from "./Dashboard";
+import React, { useState } from 'react';
+import Dashboard from './Dashboard';
+import VideoInterview from './VideoInterview';
 import './App.css';
 
 function App() {
-  return (
-    <Router>
-      <div className="App">
-        <nav>
-          <ul>
-            <li><Link to="/">Video Interview</Link></li>
-            <li><Link to="/dashboard">Recruiter Dashboard</Link></li>
-          </ul>
-        </nav>
+  const [activeTab, setActiveTab] = useState('dashboard');
 
-        <Routes>
-          <Route path="/" element={<VideoInterview />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-        </Routes>
+  return (
+    <div className="app">
+      <div className="tab-container">
+        <div className="tabs">
+          <button 
+            className={`tab ${activeTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveTab('dashboard')}
+          >
+            Recruiter Dashboard
+          </button>
+          <button 
+            className={`tab ${activeTab === 'interview' ? 'active' : ''}`}
+            onClick={() => setActiveTab('interview')}
+          >
+            Video Interview
+          </button>
+        </div>
       </div>
-    </Router>
+
+      <div className="tab-content">
+        {activeTab === 'dashboard' && <Dashboard />}
+        {activeTab === 'interview' && <VideoInterview />}
+      </div>
+    </div>
   );
 }
 
