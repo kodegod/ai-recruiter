@@ -1,0 +1,144 @@
+.video-interview {
+    padding: 20px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  
+  .video-interview h2 {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  
+  /* Validation Section */
+  .validation-section {
+    max-width: 400px;
+    margin: 0 auto 20px;
+    padding: 20px;
+    background-color: #f8fafc;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  
+  .input-group {
+    margin-bottom: 15px;
+  }
+  
+  .input-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+  }
+  
+  .input-group input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 16px;
+  }
+  
+  .input-group input:disabled {
+    background-color: #f3f4f6;
+    cursor: not-allowed;
+  }
+  
+  .error-message {
+    color: #dc2626;
+    font-size: 14px;
+    margin-top: 5px;
+    margin-bottom: 10px;
+  }
+  
+  .validate-button {
+    width: 100%;
+    padding: 10px;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+  
+  .validate-button:hover:not(:disabled) {
+    background-color: #2563eb;
+  }
+  
+  .validate-button:disabled {
+    background-color: #9ca3af;
+    cursor: not-allowed;
+  }
+  
+  /* Video Section */
+  .video-section {
+    margin: 20px 0;
+    display: flex;
+    justify-content: center;
+  }
+  
+  /* Audio Section */
+  .audio-section {
+    margin: 20px 0;
+  }
+  
+  .sound-wave {
+    width: 100%;
+    height: 100px;
+    margin-bottom: 20px;
+  }
+  
+  .controls {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+  }
+  
+  .record-button,
+  .stop-button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+  
+  .record-button {
+    background-color: #22c55e;
+    color: white;
+  }
+  
+  .record-button:hover:not(:disabled) {
+    background-color: #16a34a;
+  }
+  
+  .stop-button {
+    background-color: #ef4444;
+    color: white;
+  }
+  
+  .stop-button:hover:not(:disabled) {
+    background-color: #dc2626;
+  }
+  
+  .record-button:disabled,
+  .stop-button:disabled {
+    background-color: #9ca3af;
+    cursor: not-allowed;
+  }
+
+  .error-message {
+    background-color: #fee2e2;
+    border: 1px solid #ef4444;
+    color: #991b1b;
+    padding: 12px;
+    margin: 10px 0;
+    border-radius: 4px;
+    text-align: center;
+  }
+  
+  .error-message p {
+    margin: 0;
+    font-size: 14px;
+  }
