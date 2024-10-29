@@ -61,3 +61,7 @@ yarn-error.log*
 # Other
 .DS_Store
 Thumbs.db
+
+# Security keys
+key
+key.pub
