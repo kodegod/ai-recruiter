@@ -1,35 +1,40 @@
-import React, { useState } from 'react';
-import Dashboard from './Dashboard';
-import VideoInterview from './VideoInterview';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
+import Login from './components/Login';
+import Dashboard from './components/Dashboard';
+import VideoInterview from './components/VideoInterview';
+import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-
   return (
-    <div className="app">
-      <div className="tab-container">
-        <div className="tabs">
-          <button 
-            className={`tab ${activeTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dashboard')}
-          >
-            Recruiter Dashboard
-          </button>
-          <button 
-            className={`tab ${activeTab === 'interview' ? 'active' : ''}`}
-            onClick={() => setActiveTab('interview')}
-          >
-            Video Interview
-          </button>
+    <Router>
+      <AuthProvider>
+        <div className="app">
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute allowedRoles={['recruiter']}>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/interview"
+              element={
+                <ProtectedRoute allowedRoles={['candidate']}>
+                  <VideoInterview />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/" element={<Navigate to="/login" replace />} />
+          </Routes>
         </div>
-      </div>
-
-      <div className="tab-content">
-        {activeTab === 'dashboard' && <Dashboard />}
-        {activeTab === 'interview' && <VideoInterview />}
-      </div>
-    </div>
+      </AuthProvider>
+    </Router>
   );
 }
 

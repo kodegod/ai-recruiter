@@ -1,10 +1,56 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Text, DateTime, Boolean, JSON
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer, Float, JSON, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
+from app.database import Base
 
-Base = declarative_base()
+class InterviewSession(Base):
+    __tablename__ = 'interview_sessions'
+    
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    jd_id = Column(String(36), ForeignKey('job_descriptions.id'), nullable=False)
+    resume_id = Column(String(36), ForeignKey('candidate_resumes.id'), nullable=False)
+    
+    # Add recruiter and candidate relationships
+    recruiter_id = Column(String(36), ForeignKey('users.id'), nullable=False)
+    candidate_id = Column(String(36), ForeignKey('users.id'), nullable=True)
+    
+    # Interview metadata
+    status = Column(String(50), default='draft')
+    scheduled_datetime = Column(DateTime, nullable=True)
+    actual_start_time = Column(DateTime, nullable=True)
+    actual_end_time = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Scoring and evaluation
+    overall_score = Column(Float, default=0.0)
+    technical_score = Column(Float, default=0.0)
+    communication_score = Column(Float, default=0.0)
+    cultural_fit_score = Column(Float, default=0.0)
+    interviewer_notes = Column(Text, nullable=True)
+    
+    # Session data
+    recording_url = Column(String(512), nullable=True)
+    transcript = Column(Text, nullable=True)
+    
+    # Relationships
+    job_description = relationship("JobDescription", back_populates="interviews")
+    candidate_resume = relationship("CandidateResume", back_populates="interviews")
+    questions = relationship("InterviewQuestion", back_populates="interview_session")
+    responses = relationship("CandidateResponse", back_populates="interview_session")
+    
+    # Add relationships for recruiter and candidate
+    recruiter = relationship(
+        "User",
+        back_populates="interviews_created",
+        foreign_keys=[recruiter_id]
+    )
+    candidate = relationship(
+        "User",
+        back_populates="interviews_taken",
+        foreign_keys=[candidate_id]
+    )
 
 class JobDescription(Base):
     __tablename__ = 'job_descriptions'
@@ -41,6 +87,9 @@ class CandidateResume(Base):
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # Add uploaded_by field
+    uploaded_by = Column(String(36), ForeignKey('users.id'), nullable=True)
+    
     # Parsed information
     skills = Column(JSON, nullable=True)
     experience = Column(JSON, nullable=True)
@@ -48,38 +97,8 @@ class CandidateResume(Base):
     
     # Relationships
     interviews = relationship("InterviewSession", back_populates="candidate_resume")
-
-class InterviewSession(Base):
-    __tablename__ = 'interview_sessions'
-    
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    jd_id = Column(String(36), ForeignKey('job_descriptions.id'), nullable=False)
-    resume_id = Column(String(36), ForeignKey('candidate_resumes.id'), nullable=False)
-    
-    # Interview metadata
-    status = Column(String(50), default='created')  # created, in_progress, completed, cancelled
-    scheduled_datetime = Column(DateTime, nullable=True)
-    actual_start_time = Column(DateTime, nullable=True)
-    actual_end_time = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Scoring and evaluation
-    overall_score = Column(Float, default=0.0)
-    technical_score = Column(Float, default=0.0)
-    communication_score = Column(Float, default=0.0)
-    cultural_fit_score = Column(Float, default=0.0)
-    interviewer_notes = Column(Text, nullable=True)
-    
-    # Session data
-    recording_url = Column(String(512), nullable=True)
-    transcript = Column(Text, nullable=True)
-    
-    # Relationships
-    job_description = relationship("JobDescription", back_populates="interviews")
-    candidate_resume = relationship("CandidateResume", back_populates="interviews")
-    questions = relationship("InterviewQuestion", back_populates="interview_session")
-    responses = relationship("CandidateResponse", back_populates="interview_session")
+    # Add relationship to User
+    uploader = relationship("User", foreign_keys=[uploaded_by])
 
 class InterviewQuestion(Base):
     __tablename__ = 'interview_questions'
@@ -135,7 +154,3 @@ class CandidateResponse(Base):
     # Relationships
     interview_session = relationship("InterviewSession", back_populates="responses")
     question = relationship("InterviewQuestion", back_populates="responses")
-
-def init_db(engine):
-    """Initialize the database by creating all tables"""
-    Base.metadata.create_all(bind=engine)

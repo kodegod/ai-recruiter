@@ -1,141 +1,321 @@
-from fastapi import FastAPI, UploadFile, Depends, HTTPException, Query, File, Form
+# Standard library imports
+import json
+import logging
+import os
+import shutil
+import uuid
+from datetime import datetime
+from typing import List, Set, Dict, Any
+
+# Third-party imports
+from dotenv import load_dotenv
+from fastapi import FastAPI, UploadFile, Depends, HTTPException, Query, File, Form, status, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.exc import SQLAlchemyError
-from dotenv import load_dotenv
-import os
-import logging
 from groq import Groq
-import json
-import requests
-import uuid
-from typing import List, Set
-import shutil
-from datetime import datetime
-from pydub import AudioSegment 
+from pydub import AudioSegment
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+from typing import Optional
 
-# Import custom modules
-from file_processing import process_jd_file, process_resume_file, extract_text_from_file
-from question_generation import generate_interview_questions, modify_questions, analyze_response
-
-# Import models
-from models import (
-    Base, JobDescription, CandidateResume, InterviewSession,
-    InterviewQuestion, CandidateResponse, init_db
+# Local application imports
+from app.database import engine, get_db, Base, SessionLocal  # Remove SessionLocal as it's in database.py
+from app.models.auth import User, UserRole, UserSession
+from app.models.core import (
+    JobDescription,
+    CandidateResume,
+    InterviewSession,
+    InterviewQuestion,
+    CandidateResponse
 )
+from app.utils.auth import verify_token, get_current_user
+from app.middleware.auth import require_auth, require_recruiter, require_candidate
+from app.routes.auth import router as auth_router
+from app.utils.file_processing import process_jd_file, process_resume_file, extract_text_from_file
+from app.utils.question_generation import generate_interview_questions, modify_questions, analyze_response
+
+def init_database():
+    """Initialize database tables"""
+    try:
+        logger.info("Dropping all existing tables...")
+        Base.metadata.drop_all(bind=engine)
+        logger.info("Creating new tables...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+        raise
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Logs to console
+        logging.FileHandler('app.log')  # Logs to file
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
+# Environment variables
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
+# Validate required environment variables
+required_env_vars = {
+    "GROQ_API_KEY": GROQ_API_KEY,
+    "ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
+    "JWT_SECRET_KEY": JWT_SECRET_KEY,
+    "GOOGLE_CLIENT_ID": GOOGLE_CLIENT_ID,
+    "GOOGLE_CLIENT_SECRET": GOOGLE_CLIENT_SECRET
+}
+
+for var_name, var_value in required_env_vars.items():
+    if not var_value:
+        raise ValueError(f"{var_name} not found in environment variables")
+
+# Get frontend URL from environment
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
 # Initialize FastAPI app
 app = FastAPI(title="AI Recruiter API")
 
-# Update CORS settings for production
+# CORS configuration
+origins = [
+    FRONTEND_URL,
+    "https://accounts.google.com",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development only. In production, specify exact origins
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "Authorization"],
+    expose_headers=["*"],
+    max_age=3600
 )
 
-# Database setup
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Error handling middleware
+@app.middleware("http")
+async def error_handling_middleware(request: Request, call_next):
+    try:
+        # Log request details
+        logger.info(f"Incoming request: {request.method} {request.url}")
+        logger.debug(f"Request headers: {request.headers}")
+        
+        # Process request
+        response = await call_next(request)
+        
+        # Log response status
+        logger.info(f"Response status: {response.status_code}")
+        return response
+        
+    except SQLAlchemyError as e:
+        # Handle database errors
+        logger.error(f"Database error: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": "A database error occurred",
+                "type": "database_error"
+            }
+        )
+        
+    except Exception as e:
+        # Handle unexpected errors
+        logger.error(f"Unhandled error: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": "An unexpected error occurred. Please try again later.",
+                "type": "internal_server_error"
+            }
+        )
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests_middleware(request: Request, call_next):
+    start_time = datetime.utcnow()
+    
+    # Generate request ID for tracking
+    request_id = str(uuid.uuid4())
+    logger.info(f"Request {request_id} started: {request.method} {request.url}")
+    
+    try:
+        # Process request and capture timing
+        response = await call_next(request)
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        
+        # Log response details
+        logger.info(
+            f"Request {request_id} completed: {response.status_code} "
+            f"Duration: {duration:.3f}s"
+        )
+        
+        # Add request ID and timing headers to response
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Response-Time"] = f"{duration:.3f}s"
+        return response
+        
+    except Exception as e:
+        # Log error details
+        logger.error(
+            f"Request {request_id} failed: {str(e)}",
+            exc_info=True
+        )
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        
+        # Return error response with request ID
+        error_response = JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": "An unexpected error occurred",
+                "type": "internal_server_error",
+                "request_id": request_id
+            }
+        )
+        error_response.headers["X-Request-ID"] = request_id
+        error_response.headers["X-Response-Time"] = f"{duration:.3f}s"
+        return error_response
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint to verify API is running"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "1.0.0"
+    }
 
 # Initialize database
-init_db(engine)
-
-# API Key Verification
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY not found in environment variables")
-if not ELEVENLABS_API_KEY:
-    raise ValueError("ELEVENLABS_API_KEY not found in environment variables")
+Base.metadata.create_all(bind=engine)
 
 # Initialize Groq client
 client = Groq(api_key=GROQ_API_KEY)
 
-# Constants for file validation
+# Constants
 ALLOWED_DOCUMENT_TYPES: Set[str] = {'.pdf', '.docx', '.doc', '.txt', '.rtf'}
 MAX_FILE_SIZE: int = 5 * 1024 * 1024  # 5 MB in bytes
 
-# Dependency to get database session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Include routers
+app.include_router(auth_router)
+
+print("Current CORS origins:", origins)
+print("API routes:", [route.path for route in app.routes])
 
 def validate_file(file: UploadFile, allowed_types: Set[str], max_size: int) -> None:
     """
-    Validate file type and size
+    Validate file type and size with enhanced error handling and logging
+    
+    Args:
+        file: UploadFile object to validate
+        allowed_types: Set of allowed file extensions
+        max_size: Maximum file size in bytes
+        
+    Raises:
+        HTTPException: If validation fails
     """
-    # Check file extension
-    file_ext = os.path.splitext(file.filename)[1].lower()
-    if file_ext not in allowed_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type. Allowed types are: {', '.join(allowed_types)}"
-        )
-    
-    # Check content type
-    if not file.content_type.startswith(('application/', 'text/')):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid content type. Must be a document file."
-        )
-    
-    # Check file size (requires reading the file into memory)
-    file_size = 0
     try:
-        file_size = len(file.file.read())
-        file.file.seek(0)  # Reset file pointer to beginning
+        logger.info(f"Validating file: {file.filename}")
+        
+        # Check if file is empty
+        if not file.filename:
+            logger.error("Empty file name")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No file provided"
+            )
+            
+        # Check file extension
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in allowed_types:
+            logger.error(f"Invalid file type: {file_ext}. Allowed types: {allowed_types}")
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=f"Invalid file type. Allowed types are: {', '.join(allowed_types)}"
+            )
+        
+        # Check content type
+        if not file.content_type:
+            logger.error("No content type provided")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not determine file type"
+            )
+            
+        if not file.content_type.startswith(('application/', 'text/')):
+            logger.error(f"Invalid content type: {file.content_type}")
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="Invalid content type. Must be a document file."
+            )
+        
+        # Check file size
+        try:
+            file.file.seek(0, 2)  # Seek to end
+            file_size = file.file.tell()
+            file.file.seek(0)  # Reset to beginning
+            
+            logger.info(f"File size: {file_size/1024/1024:.2f}MB")
+            
+            if file_size > max_size:
+                logger.error(f"File too large: {file_size/1024/1024:.2f}MB > {max_size/1024/1024:.2f}MB")
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"File too large. Maximum size allowed is {max_size/1024/1024:.1f}MB"
+                )
+                
+            if file_size == 0:
+                logger.error("Empty file")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="File is empty"
+                )
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error checking file size: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Error reading file: {str(e)}"
+            )
+            
+        logger.info("File validation successful")
+        
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Unexpected error in validate_file: {str(e)}")
         raise HTTPException(
-            status_code=400,
-            detail=f"Error reading file: {str(e)}"
-        )
-    
-    if file_size > max_size:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large. Maximum size allowed is {max_size/1024/1024:.1f}MB"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while validating the file"
         )
 
 @app.post("/upload/jd")
 async def upload_jd(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """
-    Upload and process a job description document with enhanced data extraction
-    """
     try:
-        # Validate file before processing
         validate_file(file, ALLOWED_DOCUMENT_TYPES, MAX_FILE_SIZE)
-        
-        # Process file content with enhanced extraction
         processed_data = await process_jd_file(file)
         jd_id = str(uuid.uuid4())
         
-        # Create job description record with extracted information
         jd = JobDescription(
             id=jd_id,
             content=processed_data["content"],
             file_name=file.filename,
             file_type=os.path.splitext(file.filename)[1].lower(),
             title=processed_data["title"],
-            company=processed_data["company"],
-            requirements=processed_data.get("metadata", {})
+            company=processed_data["company"]
         )
         
         db.add(jd)
@@ -146,7 +326,6 @@ async def upload_jd(file: UploadFile = File(...), db: Session = Depends(get_db))
             "title": processed_data["title"],
             "company": processed_data["company"],
             "file_name": file.filename,
-            "file_size": len(processed_data["content"]),
             "message": "Job description uploaded successfully"
         }
         
@@ -162,99 +341,119 @@ async def upload_jd(file: UploadFile = File(...), db: Session = Depends(get_db))
     finally:
         await file.close()
 
+
 @app.post("/upload/resume")
-async def upload_resume(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_resume(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth)
+):
     """
-    Upload and process a resume with enhanced candidate information extraction
+    Upload and process a resume with authentication
     """
     try:
+        # Handle user email for logging
+        user_email = getattr(current_user, 'email', 'unknown@email.com') if isinstance(current_user, User) else current_user.get('email', 'unknown@email.com')
+        logger.info(f"Received resume upload request from user: {user_email}")
+        logger.info(f"File name: {file.filename}")
+        logger.info(f"Content type: {file.content_type}")
+        
         # Validate file before processing
         validate_file(file, ALLOWED_DOCUMENT_TYPES, MAX_FILE_SIZE)
         
-        # Process file content with enhanced extraction
-        processed_data = await process_resume_file(file)
-        resume_id = str(uuid.uuid4())
-        
-        # Create resume record with extracted information
-        resume = CandidateResume(
-            id=resume_id,
-            content=processed_data["content"],
-            file_name=file.filename,
-            file_type=os.path.splitext(file.filename)[1].lower(),
-            candidate_name=processed_data["candidate_name"],
-            email=processed_data["email"],
-            skills=processed_data.get("skills", []),
-            experience=processed_data.get("experience", [])
-        )
-        
-        db.add(resume)
-        db.commit()
-        
-        return {
-            "resume_id": resume_id,
-            "candidate_name": processed_data["candidate_name"],
-            "email": processed_data["email"],
-            "file_name": file.filename,
-            "file_size": len(processed_data["content"]),
-            "message": "Resume uploaded successfully"
-        }
-        
+        try:
+            # Process file content
+            processed_data = await process_resume_file(file)
+            logger.info("Resume file processed successfully")
+            
+            resume_id = str(uuid.uuid4())
+            
+            # Create resume record with fallback values
+            resume = CandidateResume(
+                id=resume_id,
+                content=processed_data.get("content", ""),
+                file_name=file.filename,
+                file_type=os.path.splitext(file.filename)[1].lower(),
+                candidate_name=processed_data.get("candidate_name", "Unknown Candidate"),
+                email=processed_data.get("email", user_email),  # Fallback to user's email
+                skills=processed_data.get("skills", []),
+                experience=processed_data.get("experience", []),
+                uploaded_by=str(getattr(current_user, 'id', None)) if isinstance(current_user, User) else str(current_user.get('id'))
+            )
+            
+            db.add(resume)
+            db.commit()
+            logger.info(f"Resume record created with ID: {resume_id}")
+            
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "resume_id": resume_id,
+                    "candidate_name": resume.candidate_name,
+                    "email": resume.email,
+                    "file_name": resume.file_name,
+                    "message": "Resume uploaded successfully"
+                }
+            )
+            
+        except HTTPException as he:
+            logger.error(f"HTTP Exception processing resume: {str(he)}")
+            raise he
+        except Exception as e:
+            logger.error(f"Error processing resume: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error processing resume: {str(e)}"
+            )
+            
     except HTTPException as he:
+        logger.error(f"HTTP Exception in upload_resume: {str(he)}")
+        db.rollback()
         raise he
     except Exception as e:
+        logger.error(f"Error in upload_resume: {str(e)}")
         db.rollback()
-        logger.error(f"Error uploading resume: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Error processing resume: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
         )
     finally:
         await file.close()
 
 # Interview Management Endpoints
 @app.post("/interview/create")
-async def create_interview_session(
+async def create_interview(
     jd_id: str = Form(...),
     resume_id: str = Form(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth)  # Add this to get the current user
 ):
-    """
-    Create interview session with 5 questions
-    """
     try:
-        logger.info(f"Creating interview session with JD ID: {jd_id} and Resume ID: {resume_id}")
-        
-        # Verify JD and Resume exist
         job_description = db.query(JobDescription).filter(JobDescription.id == jd_id).first()
         candidate_resume = db.query(CandidateResume).filter(CandidateResume.id == resume_id).first()
         
-        if not job_description:
-            logger.error(f"Job Description not found with ID: {jd_id}")
-            raise HTTPException(status_code=404, detail="Job Description not found")
-            
-        if not candidate_resume:
-            logger.error(f"Resume not found with ID: {resume_id}")
-            raise HTTPException(status_code=404, detail="Resume not found")
+        if not job_description or not candidate_resume:
+            raise HTTPException(status_code=404, detail="Job Description or Resume not found")
         
-        # Create interview session
         session_id = str(uuid.uuid4())
         interview_session = InterviewSession(
             id=session_id,
             jd_id=jd_id,
             resume_id=resume_id,
-            status="draft",  # Initial status is draft until questions are confirmed
-            scheduled_datetime=datetime.utcnow()
+            recruiter_id=str(current_user.id),  # Add the recruiter_id
+            status="draft",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
+        
         db.add(interview_session)
         db.flush()
         
-        # Generate exactly 5 questions
         generated_questions = await generate_interview_questions(
             job_description.content,
             candidate_resume.content
         )
         
-        # Add questions
         questions = []
         for idx, question_data in enumerate(generated_questions, 1):
             question = InterviewQuestion(
@@ -264,12 +463,9 @@ async def create_interview_session(
                 question_type=question_data.get("question_type", "general"),
                 category=question_data.get("assesses", "general"),
                 sequence_number=idx,
-                is_generated=True,
-                expected_answer_keywords=question_data.get("key_points", ""),
-                scoring_rubric={"key_points": question_data.get("key_points", [])}
+                is_generated=True
             )
             db.add(question)
-            
             questions.append({
                 "id": question.id,
                 "question_text": question.question_text,
@@ -279,15 +475,11 @@ async def create_interview_session(
             })
         
         db.commit()
-        logger.info(f"Successfully created interview session with ID: {session_id}")
         
         return {
             "interview_id": session_id,
-            "status": "draft",
-            "candidate_name": candidate_resume.candidate_name,
-            "job_title": job_description.title,
             "questions": questions,
-            "message": "Interview session created with generated questions"
+            "status": "draft"
         }
         
     except HTTPException:
@@ -299,12 +491,16 @@ async def create_interview_session(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/interview/{interview_id}/details")
-async def get_interview_details(interview_id: str, db: Session = Depends(get_db)):
+async def get_interview_details(
+    interview_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth)  # Both roles can view details
+):
     """
-    Get comprehensive interview details including questions, responses, and analysis
+    Get interview details with role-based access control
     """
     try:
-        # Get interview session with related data
+        # Get interview session
         interview_session = db.query(InterviewSession).filter(
             InterviewSession.id == interview_id
         ).first()
@@ -312,13 +508,24 @@ async def get_interview_details(interview_id: str, db: Session = Depends(get_db)
         if not interview_session:
             raise HTTPException(status_code=404, detail="Interview session not found")
         
-        # Prepare questions with responses and analysis
+        # Check permissions
+        if current_user.role == UserRole.CANDIDATE:
+            # Candidates can only view their own interviews
+            candidate_resume = db.query(CandidateResume).filter(
+                CandidateResume.id == interview_session.resume_id
+            ).first()
+            if candidate_resume.email != current_user.email:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Not authorized to view this interview"
+                )
+        
+        # Get all related data
         questions_with_responses = []
         total_questions = len(interview_session.questions)
         answered_questions = 0
         
         for question in interview_session.questions:
-            # Get responses for this question
             responses = [
                 {
                     "response_text": response.response_text,
@@ -342,94 +549,44 @@ async def get_interview_details(interview_id: str, db: Session = Depends(get_db)
                 "question_type": question.question_type,
                 "category": question.category,
                 "sequence_number": question.sequence_number,
-                "is_modified": question.is_modified,
-                "original_question": question.original_question if question.is_modified else None,
-                "expected_answer_keywords": question.expected_answer_keywords,
-                "scoring_rubric": question.scoring_rubric,
                 "responses": responses
             })
         
-        # Calculate interview progress
+        # Calculate progress
         progress = {
             "total_questions": total_questions,
             "answered_questions": answered_questions,
             "completion_percentage": (answered_questions / total_questions * 100) if total_questions > 0 else 0
         }
         
-        # Calculate average scores
-        scores = {
-            "overall_score": interview_session.overall_score,
-            "technical_score": interview_session.technical_score,
-            "communication_score": interview_session.communication_score,
-            "cultural_fit_score": interview_session.cultural_fit_score,
-            "score_breakdown": {
-                "technical_proficiency": interview_session.technical_score,
-                "communication_skills": interview_session.communication_score,
-                "problem_solving": sum(q.responses[0].score for q in interview_session.questions if q.responses and q.question_type == "technical") / total_questions if total_questions > 0 else 0,
-                "experience_relevance": sum(q.responses[0].score for q in interview_session.questions if q.responses and q.question_type == "experience") / total_questions if total_questions > 0 else 0
-            }
-        }
-        
-        # Get timing information
-        timing = {
-            "created_at": interview_session.created_at.isoformat() if interview_session.created_at else None,
-            "scheduled_datetime": interview_session.scheduled_datetime.isoformat() if interview_session.scheduled_datetime else None,
-            "actual_start_time": interview_session.actual_start_time.isoformat() if interview_session.actual_start_time else None,
-            "actual_end_time": interview_session.actual_end_time.isoformat() if interview_session.actual_end_time else None,
-            "duration_minutes": (interview_session.actual_end_time - interview_session.actual_start_time).total_seconds() / 60 if interview_session.actual_end_time and interview_session.actual_start_time else None
-        }
-        
         return {
             "interview_id": interview_session.id,
             "status": interview_session.status,
             "progress": progress,
-            "timing": timing,
             "job_description": {
                 "id": interview_session.job_description.id,
                 "title": interview_session.job_description.title,
-                "company": interview_session.job_description.company,
-                "content": interview_session.job_description.content,
-                "requirements": interview_session.job_description.requirements
+                "company": interview_session.job_description.company
             },
             "candidate": {
                 "id": interview_session.candidate_resume.id,
                 "name": interview_session.candidate_resume.candidate_name,
-                "email": interview_session.candidate_resume.email,
-                "skills": interview_session.candidate_resume.skills,
-                "experience": interview_session.candidate_resume.experience
+                "email": interview_session.candidate_resume.email
             },
-            "scoring": scores,
             "questions": questions_with_responses,
-            "interview_summary": {
-                "strengths": [
-                    response.ai_feedback 
-                    for question in interview_session.questions 
-                    for response in question.responses 
-                    if response.score >= 8
-                ],
-                "areas_for_improvement": [
-                    response.improvement_suggestions
-                    for question in interview_session.questions
-                    for response in question.responses
-                    if response.score < 6
-                ],
-                "overall_recommendation": "Recommended for next round" if interview_session.overall_score >= 7 else "Consider other candidates" if interview_session.overall_score < 5 else "Requires further evaluation"
-            }
+            "created_by": interview_session.recruiter_id,
+            "created_at": interview_session.created_at.isoformat(),
+            "overall_score": interview_session.overall_score
         }
         
-    except SQLAlchemyError as e:
-        logger.error(f"Database error getting interview details: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Database error occurred while fetching interview details"
-        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting interview details: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving interview details: {str(e)}"
         )
-
 
 @app.put("/interview/questions/{question_id}")
 async def update_interview_question(
@@ -474,46 +631,37 @@ async def update_interview_question(
 @app.post("/interview/{interview_id}/confirm")
 async def confirm_interview_questions(
     interview_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter)  # Only recruiters can confirm questions
 ):
     """
-    Confirm the interview questions and mark the session as ready
+    Confirm interview questions with authentication
     """
     try:
-        logger.info(f"Confirming questions for interview: {interview_id}")
-        
         interview = db.query(InterviewSession).filter(
-            InterviewSession.id == interview_id.strip()
+            InterviewSession.id == interview_id
         ).first()
         
         if not interview:
             raise HTTPException(status_code=404, detail="Interview session not found")
         
-        # Verify we have exactly 5 questions
-        questions = db.query(InterviewQuestion).filter(
-            InterviewQuestion.interview_session_id == interview_id
-        ).all()
-        
-        if len(questions) != 5:
+        # Verify ownership
+        if interview.recruiter_id != current_user.id:
             raise HTTPException(
-                status_code=400,
-                detail=f"Interview must have exactly 5 questions. Current count: {len(questions)}"
+                status_code=403,
+                detail="Not authorized to modify this interview"
             )
         
-        # Update interview status to ready
+        # Update status
         interview.status = "ready"
         interview.updated_at = datetime.utcnow()
-        
-        # Log the change
-        logger.info(f"Setting interview {interview_id} status to ready")
         
         db.commit()
         
         return {
             "interview_id": interview_id,
             "status": "ready",
-            "message": "Interview questions confirmed and ready for use",
-            "total_questions": len(questions)
+            "message": "Interview questions confirmed and ready for use"
         }
         
     except HTTPException:
@@ -773,10 +921,9 @@ async def validate_interview_id(interview_id: str, db: Session = Depends(get_db)
     Validate if an interview ID exists and is ready for interview
     """
     try:
-        # Log the received ID for debugging
         logger.info(f"Validating interview ID: {interview_id}")
         
-        # Get interview session
+        # Get interview session with questions
         interview = db.query(InterviewSession).filter(
             InterviewSession.id == interview_id.strip()
         ).first()
@@ -806,15 +953,15 @@ async def validate_interview_id(interview_id: str, db: Session = Depends(get_db)
                 }
             )
         
-        # Get questions count
+        # Get questions count and verify all 5 questions exist
         questions = db.query(InterviewQuestion).filter(
             InterviewQuestion.interview_session_id == interview_id
-        ).all()
+        ).order_by(InterviewQuestion.sequence_number).all()
         
         logger.info(f"Found {len(questions)} questions")
         
-        if not questions or len(questions) != 5:
-            logger.warning(f"Interview {interview_id} has {len(questions)} questions, expected 5")
+        if not questions:
+            logger.warning(f"No questions found for interview {interview_id}")
             return JSONResponse(
                 status_code=400,
                 content={
@@ -822,13 +969,46 @@ async def validate_interview_id(interview_id: str, db: Session = Depends(get_db)
                     "message": "Interview is not properly set up (missing questions)"
                 }
             )
+            
+        if len(questions) != 5:
+            logger.warning(f"Interview {interview_id} has {len(questions)} questions, expected 5")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "valid": False,
+                    "message": f"Interview must have exactly 5 questions (found {len(questions)})"
+                }
+            )
         
-        return {
-            "valid": True,
-            "message": "Interview ID is valid and ready to start",
-            "total_questions": len(questions)
-        }
+        # Verify all questions have proper content
+        for q in questions:
+            if not q.question_text or not q.question_type:
+                logger.warning(f"Invalid question found in interview {interview_id}")
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "valid": False,
+                        "message": "One or more questions are not properly formatted"
+                    }
+                )
         
+        # All validations passed
+        return JSONResponse(
+            status_code=200,
+            content={
+                "valid": True,
+                "message": "Interview ID is valid and ready to start",
+                "total_questions": len(questions),
+                "interview_status": interview.status
+            }
+        )
+        
+    except SQLAlchemyError as e:
+        logger.error(f"Database error validating interview ID: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Database error occurred while validating interview"
+        )
     except Exception as e:
         logger.error(f"Error validating interview ID: {str(e)}")
         raise HTTPException(
@@ -1054,6 +1234,14 @@ def extract_question(ai_response):
     
     # If no questions were found, return a default message
     return "No explicit question found in the AI response. The AI may be waiting for more information or clarification."
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Error in startup: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

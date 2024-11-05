@@ -317,7 +317,8 @@ Overall Feedback: [feedback]
                 {"role": "system", "content": "You are an expert at evaluating interview responses."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7
+            temperature=0.8,
+            max_tokens=2000
         )
 
         # Parse the analysis

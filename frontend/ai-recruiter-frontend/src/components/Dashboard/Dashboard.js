@@ -1,6 +1,76 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Dashboard.css';
+import { useAuth } from '../../contexts/AuthContext';
+import LogoutButton from '../LogoutButton';
+
+// Error message formatting helper
+const formatErrorMessage = (error) => {
+  if (typeof error === 'string') return error;
+  if (error?.response?.data?.detail) return error.response.data.detail;
+  if (error?.message) return error.message;
+  return 'An unexpected error occurred';
+};
+
+// Create axios instance
+const createApi = (token) => {
+  const api = axios.create({
+    baseURL: process.env.REACT_APP_API_URL,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json',
+    },
+    withCredentials: true
+  });
+
+  // Add request interceptor
+  api.interceptors.request.use((config) => {
+    console.log('🟡 API Request:', {
+      url: config.url,
+      method: config.method,
+      hasToken: !!config.headers.Authorization
+    });
+
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    } else {
+      config.headers['Content-Type'] = 'application/json';
+    }
+    
+    const currentToken = localStorage.getItem('token');
+    if (currentToken) {
+      config.headers.Authorization = `Bearer ${currentToken}`;
+    }
+    return config;
+  }, (error) => {
+    console.error('🔴 Request Error:', error);
+    return Promise.reject(error);
+  });
+
+  // Add response interceptor
+  api.interceptors.response.use(
+    (response) => {
+      console.log('🟢 API Response:', {
+        url: response.config.url,
+        status: response.status
+      });
+      return response;
+    },
+    async (error) => {
+      console.error('🔴 Response Error:', error.response || error);
+      
+      if (error.response?.status === 401) {
+        console.log('🟡 Unauthorized, redirecting to login');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
+      return Promise.reject(error);
+    }
+  );
+
+  return api;
+};
 
 function Dashboard() {
   // State management
@@ -19,27 +89,60 @@ function Dashboard() {
   const [candidateReport, setCandidateReport] = useState(null);
   const [isValidatingId, setIsValidatingId] = useState(false);
   const [searchError, setSearchError] = useState(null);
+  const { user } = useAuth();
+  const [api] = useState(() => createApi(localStorage.getItem('token')));
 
-  // Check for completed interviews on component mount
+  // Initialize dashboard
   useEffect(() => {
-    checkCompletedInterviews();
+    const initializeDashboard = async () => {
+      console.log('Initializing dashboard...');
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        console.warn('No token found, redirecting to login');
+        window.location.href = '/login';
+        return;
+      }
+  
+      try {
+        await checkCompletedInterviews();
+      } catch (error) {
+        console.error('Dashboard initialization error:', error);
+        if (error.response?.status === 401) {
+          window.location.href = '/login';
+        }
+      }
+    };
+  
+    initializeDashboard();
   }, []);
 
   // Function to check for completed interviews
   const checkCompletedInterviews = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/interview/check-completed');
-      setHasCompletedInterviews(response.data.has_completed_interviews);
+      console.log('Checking completed interviews...');
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.warn('No token found');
+        return;
+      }
+  
+      const response = await api.get('/interview/check-completed');
+      console.log('Check completed response:', response.data);
+      
+      if (response.data !== undefined) {
+        setHasCompletedInterviews(Boolean(response.data.has_completed_interviews));
+      }
     } catch (error) {
-      console.error('Error checking completed interviews:', error);
+      console.error('Error checking completed interviews:', error.response || error);
     }
   };
 
-  // Handle file selection
+  // Handle file selection for JD
   const handleJdFileChange = (event) => {
     const file = event.target.files[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
         setError('Job Description file size must be less than 5MB');
         event.target.value = null;
       } else {
@@ -49,12 +152,14 @@ function Dashboard() {
     }
   };
 
+  // Handle file selection for Resume
   const handleResumeFileChange = (event) => {
     const file = event.target.files[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
         setError('Resume file size must be less than 5MB');
         event.target.value = null;
+        setResumeFile(null);
       } else {
         setResumeFile(file);
         setError(null);
@@ -77,88 +182,67 @@ function Dashboard() {
     setQuestionsConfirmed(false);
 
     try {
+      console.log('Starting file upload...');
+      
       // Upload JD
       const jdFormData = new FormData();
       jdFormData.append('file', jdFile);
 
-      const jdResponse = await axios.post(
-        'http://localhost:8000/upload/jd',
-        jdFormData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-          onUploadProgress: (progressEvent) => {
-            const progress = (progressEvent.loaded / progressEvent.total) * 100;
-            setUploadProgress(prev => ({ ...prev, jd: progress }));
-          }
+      console.log('Uploading JD...');
+      const jdResponse = await api.post('/upload/jd', jdFormData, {
+        onUploadProgress: (progressEvent) => {
+          const progress = (progressEvent.loaded / progressEvent.total) * 100;
+          setUploadProgress(prev => ({ ...prev, jd: progress }));
         }
-      );
+      });
+
+      if (!jdResponse.data?.jd_id) {
+        throw new Error('Invalid JD upload response');
+      }
 
       // Upload Resume
       const resumeFormData = new FormData();
       resumeFormData.append('file', resumeFile);
 
-      const resumeResponse = await axios.post(
-        'http://localhost:8000/upload/resume',
-        resumeFormData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-          onUploadProgress: (progressEvent) => {
-            const progress = (progressEvent.loaded / progressEvent.total) * 100;
-            setUploadProgress(prev => ({ ...prev, resume: progress }));
-          }
+      console.log('Uploading resume...');
+      const resumeResponse = await api.post('/upload/resume', resumeFormData, {
+        onUploadProgress: (progressEvent) => {
+          const progress = (progressEvent.loaded / progressEvent.total) * 100;
+          setUploadProgress(prev => ({ ...prev, resume: progress }));
         }
-      );
+      });
 
-      // Create interview session
-      const formData = new URLSearchParams();
+      if (!resumeResponse.data?.resume_id) {
+        throw new Error('Invalid resume upload response');
+      }
+  
+      // Create interview session - FIXED THIS PART
+      const formData = new FormData();
       formData.append('jd_id', jdResponse.data.jd_id);
       formData.append('resume_id', resumeResponse.data.resume_id);
 
-      const createInterviewResponse = await axios.post(
-        'http://localhost:8000/interview/create',
-        formData,
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          }
-        }
-      );
+      console.log('Creating interview session...');
+      const createInterviewResponse = await api.post('/interview/create', formData);
 
-      setInterviewId(createInterviewResponse.data.interview_id);
-      setQuestions(createInterviewResponse.data.questions || []);
-      setSuccess('Files uploaded and questions generated successfully!');
-      
-    } catch (error) {
-      console.error('Upload Error:', error);
-      
-      let errorMessage = 'Error uploading files or generating questions.';
-      
-      if (error.response) {
-        console.error('Error Response:', error.response.data);
-        errorMessage = error.response.data.detail || error.response.data.message || errorMessage;
-      } else if (error.request) {
-        errorMessage = 'No response from server. Please check your connection.';
+      console.log('Interview Creation Response:', createInterviewResponse.data);
+
+      const { interview_id, questions: generatedQuestions } = createInterviewResponse.data;
+
+      if (interview_id) {
+        setInterviewId(interview_id);
+        setQuestions(generatedQuestions || []);
+        setSuccess('Files uploaded and questions generated successfully!');
       } else {
-        errorMessage = error.message;
+        throw new Error('Invalid response from server');
       }
-      
-      setError(errorMessage);
+
+    } catch (error) {
+      console.error('Upload Error:', error.response || error);
+      setError(formatErrorMessage(error));
     } finally {
       setIsLoading(false);
       setUploadProgress({ jd: 0, resume: 0 });
     }
-  };
-
-  // Handle edit/save question
-  const toggleEditQuestion = (questionId) => {
-    setEditingQuestions(prev => ({
-      ...prev,
-      [questionId]: !prev[questionId]
-    }));
   };
 
   // Handle question modification
@@ -170,18 +254,23 @@ function Dashboard() {
     ));
   };
 
+  // Handle edit/save question
+  const toggleEditQuestion = (questionId) => {
+    setEditingQuestions(prev => ({
+      ...prev,
+      [questionId]: !prev[questionId]
+    }));
+  };
+
   // Save individual question
   const handleSaveQuestion = async (questionId) => {
     try {
       setIsLoading(true);
       const question = questions.find(q => q.id === questionId);
       
-      await axios.put(
-        `http://localhost:8000/interview/questions/${questionId}`,
-        {
-          question_text: question.question_text
-        }
-      );
+      await api.put(`/interview/questions/${questionId}`, {
+        question_text: question.question_text
+      });
       
       setEditingQuestions(prev => ({
         ...prev,
@@ -190,7 +279,7 @@ function Dashboard() {
       
       setSuccess('Question saved successfully!');
     } catch (error) {
-      setError('Error saving question: ' + (error.response?.data?.detail || error.message));
+      setError(formatErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
@@ -202,21 +291,18 @@ function Dashboard() {
       setIsLoading(true);
       setError(null);
       
-      // Save any remaining edited questions
       const savePromises = Object.keys(editingQuestions)
         .filter(id => editingQuestions[id])
         .map(id => handleSaveQuestion(id));
       
       await Promise.all(savePromises);
-      
-      // Mark questions as confirmed
-      await axios.post(`http://localhost:8000/interview/${interviewId}/confirm`);
+      await api.post(`/interview/${interviewId}/confirm`);
       
       setQuestionsConfirmed(true);
       setSuccess(`Questions confirmed! Use Interview ID: ${interviewId} for the video interview.`);
       
     } catch (error) {
-      setError('Error confirming questions: ' + (error.response?.data?.detail || error.message));
+      setError(formatErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
@@ -225,62 +311,48 @@ function Dashboard() {
   // Handle interview report search
   const handleSearchReport = async () => {
     if (!searchInterviewId.trim()) {
-      setError('Please enter an Interview ID');
+      setSearchError('Please enter an Interview ID');
       return;
     }
 
     try {
       setIsLoading(true);
+      setIsValidatingId(true);
       setError(null);
 
-      // Log the ID being searched for debugging
-      console.log('Searching for interview:', searchInterviewId);
-
-      const response = await axios.get(
-        `http://localhost:8000/interview/${searchInterviewId.trim()}/details`,
-        {
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+      const response = await api.get(`/interview/${searchInterviewId.trim()}/details`);
 
       if (response.data) {
         setCandidateReport(response.data);
       } else {
-        setError('No data found for this interview ID');
+        setSearchError('No data found for this interview ID');
       }
     } catch (error) {
       console.error('Error fetching report:', error.response || error);
-      let errorMessage = 'Error fetching report: ';
-      
-      if (error.response?.status === 404) {
-        errorMessage = 'Interview not found';
-      } else if (error.response?.data?.detail) {
-        errorMessage = error.response.data.detail;
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else {
-        errorMessage += 'Failed to fetch interview report';
-      }
-      
-      setError(errorMessage);
+      setSearchError(formatErrorMessage(error));
       setCandidateReport(null);
     } finally {
       setIsLoading(false);
+      setIsValidatingId(false);
     }
   };
 
   return (
     <div className="dashboard">
       <h1>Recruiter Dashboard</h1>
-      
+      <div className="user-info flex items-center gap-4">
+        <div>
+          <p className="font-medium">{user?.name}</p>
+          <p className="text-sm text-gray-600">{user?.email}</p>
+        </div>
+        <LogoutButton />
+      </div>
+
       {/* Alerts */}
       {error && (
         <div className="alert alert-error">
           <h4>Error</h4>
-          <p>{error}</p>
+          <p>{typeof error === 'string' ? error : formatErrorMessage(error)}</p>
         </div>
       )}
       
@@ -393,7 +465,7 @@ function Dashboard() {
         </section>
       )}
 
-      {/* Interview Report Section - Only show if there are completed interviews */}
+      {/* Interview Report Section */}
       {hasCompletedInterviews && (
         <section className="report-section">
           <h2>Interview Report</h2>
@@ -419,7 +491,7 @@ function Dashboard() {
             </div>
             {searchError && (
               <div className="search-error">
-                {searchError}
+                {typeof searchError === 'string' ? searchError : formatErrorMessage(searchError)}
               </div>
             )}
           </div>
@@ -428,17 +500,17 @@ function Dashboard() {
           {candidateReport && (
             <div className="report-content">
               <div className="candidate-info">
-                <h3>Candidate: {candidateReport.candidate.name}</h3>
+                <h3>Candidate: {candidateReport.candidate?.name}</h3>
                 <p>Status: {candidateReport.status}</p>
-                <p>Overall Score: {candidateReport.scoring.overall_score}</p>
+                <p>Overall Score: {candidateReport.scoring?.overall_score}</p>
               </div>
 
               <div className="questions-responses">
                 <h4>Questions and Responses:</h4>
-                {candidateReport.questions.map((q, index) => (
+                {candidateReport.questions?.map((q, index) => (
                   <div key={index} className="qa-pair">
                     <p className="question">Q: {q.question_text}</p>
-                    {q.responses.map((r, rIndex) => (
+                    {q.responses?.map((r, rIndex) => (
                       <div key={rIndex} className="response">
                         <p>A: {r.response_text}</p>
                         <p className="score">Score: {r.score}</p>
@@ -452,40 +524,44 @@ function Dashboard() {
               <div className="scores-grid">
                 <div className="score-card">
                   <h4>Technical Score</h4>
-                  <p>{candidateReport.scoring.technical_score}</p>
+                  <p>{candidateReport.scoring?.technical_score}</p>
                 </div>
                 <div className="score-card">
                   <h4>Communication Score</h4>
-                  <p>{candidateReport.scoring.communication_score}</p>
+                  <p>{candidateReport.scoring?.communication_score}</p>
                 </div>
                 <div className="score-card">
                   <h4>Cultural Fit Score</h4>
-                  <p>{candidateReport.scoring.cultural_fit_score}</p>
+                  <p>{candidateReport.scoring?.cultural_fit_score}</p>
                 </div>
               </div>
 
               <div className="interview-summary">
                 <h4>Interview Summary</h4>
-                <div className="summary-section">
-                  <h5>Strengths</h5>
-                  <ul>
-                    {candidateReport.interview_summary.strengths.map((strength, index) => (
-                      <li key={index}>{strength}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="summary-section">
-                  <h5>Areas for Improvement</h5>
-                  <ul>
-                    {candidateReport.interview_summary.areas_for_improvement.map((area, index) => (
-                      <li key={index}>{area}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="overall-recommendation">
-                  <h5>Overall Recommendation</h5>
-                  <p>{candidateReport.interview_summary.overall_recommendation}</p>
-                </div>
+                {candidateReport.interview_summary && (
+                  <>
+                    <div className="summary-section">
+                      <h5>Strengths</h5>
+                      <ul>
+                        {candidateReport.interview_summary.strengths?.map((strength, index) => (
+                          <li key={index}>{strength}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="summary-section">
+                      <h5>Areas for Improvement</h5>
+                      <ul>
+                        {candidateReport.interview_summary.areas_for_improvement?.map((area, index) => (
+                          <li key={index}>{area}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="overall-recommendation">
+                      <h5>Overall Recommendation</h5>
+                      <p>{candidateReport.interview_summary.overall_recommendation}</p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}

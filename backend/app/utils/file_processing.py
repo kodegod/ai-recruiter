@@ -127,7 +127,7 @@ async def process_resume_file(file: UploadFile) -> Dict[str, Any]:
         file_extension = os.path.splitext(file.filename)[1].lower()
         if file_extension not in ALLOWED_EXTENSIONS:
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid file type. Allowed types are: {', '.join(ALLOWED_EXTENSIONS)}"
             )
 
@@ -138,15 +138,21 @@ async def process_resume_file(file: UploadFile) -> Dict[str, Any]:
             # Extract text and metadata
             content = extract_text_from_file(file_path)
             
-            # Extract candidate information
+            # Extract candidate information with defaults
             candidate_info = extract_candidate_info(content["content"])
             
-            return {
+            processed_data = {
                 "content": content["content"],
-                "candidate_name": candidate_info.get("name", "Unknown Candidate"),
-                "email": candidate_info.get("email", ""),
-                "metadata": content.get("metadata", {})
+                "candidate_name": candidate_info.get("name") or "Unknown Candidate",
+                "email": candidate_info.get("email", ""),  # Allow empty email, will be handled in upload endpoint
+                "metadata": content.get("metadata", {}),
+                "skills": [],  # Add empty skills list
+                "experience": []  # Add empty experience list
             }
+            
+            logger.info(f"Processed resume data: {json.dumps(processed_data, default=str)[:200]}...")  # Log first 200 chars
+            
+            return processed_data
             
         finally:
             # Clean up temporary file
@@ -154,12 +160,13 @@ async def process_resume_file(file: UploadFile) -> Dict[str, Any]:
                 os.remove(file_path)
                 logger.info(f"Temporary file removed: {file_path}")
                 
-    except HTTPException:
-        raise
+    except HTTPException as he:
+        logger.error(f"HTTP Exception in process_resume_file: {str(he)}")
+        raise he
     except Exception as e:
         logger.error(f"Error processing resume file: {str(e)}")
         raise HTTPException(
-            status_code=500,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing resume: {str(e)}"
         )
 

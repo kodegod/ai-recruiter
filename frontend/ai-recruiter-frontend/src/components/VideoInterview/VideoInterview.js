@@ -1,4 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import LogoutButton from '../LogoutButton';
 import { ReactMic } from 'react-mic';
 import Webcam from 'react-webcam';
 import axios from 'axios';
@@ -13,6 +15,7 @@ function VideoInterview() {
   const [isInterviewComplete, setIsInterviewComplete] = useState(false);
   const [error, setError] = useState(null);
   const [totalQuestions, setTotalQuestions] = useState(5);
+  const { user } = useAuth();
   const webcamRef = useRef(null);
 
   // Validate interview ID
@@ -131,7 +134,13 @@ function VideoInterview() {
   return (
     <div className="video-interview">
       <h2>Video Interview</h2>
-
+      <div className="user-info flex items-center gap-4">
+                    <div>
+                        <p className="font-medium">{user?.name}</p>
+                        <p className="text-sm text-gray-600">{user?.email}</p>
+                    </div>
+        <LogoutButton />
+      </div>
       {/* Interview ID Validation Section */}
       {!isValidated && (
         <div className="validation-section">

@@ -1,12 +1,37 @@
+# Core Framework
 fastapi==0.109.1
 uvicorn==0.27.0
-python-multipart==0.0.6
+
+# Database
 sqlalchemy==2.0.25
+python-multipart==0.0.6
+
+# Environment and Config
 python-dotenv==1.0.0
+
+# API Services
 groq==0.4.2
 requests==2.31.0
+
+# Data Processing
 pydantic==2.6.1
 aiofiles==23.2.1
-python-jose==3.3.0
 python-docx==1.1.0
 pypdf2==3.0.1
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+bcrypt==4.0.1
+
+# Session Management
+itsdangerous==2.1.2
+python-multipart==0.0.6
+
+# CORS
+fastapi-cors==0.0.6
+
+# JWT Handling
+pyjwt==2.8.0
