@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import List, Set, Dict, Any
 
 # Third-party imports
+import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, Depends, HTTPException, Query, File, Form, status, Request
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -726,6 +727,9 @@ async def process_video(
     """
     Process audio from video interview and handle interview flow
     """
+    temp_audio_path = None
+    temp_mp3_path = None
+    
     try:
         # Get interview session
         interview_session = db.query(InterviewSession).filter(
@@ -735,18 +739,6 @@ async def process_video(
         if not interview_session:
             raise HTTPException(status_code=404, detail="Interview session not found")
 
-        # Validate file size
-        file_size = 0
-        content = await file.read()
-        file_size = len(content)
-        await file.seek(0)  # Reset file pointer
-        
-        if file_size > 1024 * 1024 * 5:  # 5MB limit
-            raise HTTPException(
-                status_code=400,
-                detail="File too large. Please limit recordings to 5MB or less."
-            )
-        
         # Get current question count
         answered_questions = db.query(CandidateResponse).filter(
             CandidateResponse.interview_session_id == interview_session.id
@@ -768,19 +760,30 @@ async def process_video(
         if interview_session.status != "in_progress":
             interview_session.status = "in_progress"
             interview_session.actual_start_time = datetime.utcnow()
+            db.commit()
+
+        # Validate file size
+        content = await file.read()
+        file_size = len(content)
         
-        # Save uploaded audio file temporarily
-        temp_audio_path = f"temp_{uuid.uuid4()}.webm"
+        if file_size > 5 * 1024 * 1024:  # 5MB limit
+            raise HTTPException(
+                status_code=400,
+                detail="File too large. Please limit recordings to 5MB or less."
+            )
+
+        # Process audio file
         try:
+            # Generate temporary file paths
+            temp_audio_path = f"temp_{uuid.uuid4()}.webm"
+            temp_mp3_path = f"temp_{uuid.uuid4()}.mp3"
+            
             # Save the original WebM file
             with open(temp_audio_path, "wb") as buffer:
-                await file.seek(0)  # Ensure we're at the start of the file
                 buffer.write(content)
             
             # Convert audio to MP3 format
-            from pydub import AudioSegment
             audio = AudioSegment.from_file(temp_audio_path, format="webm")
-            temp_mp3_path = f"temp_{uuid.uuid4()}.mp3"
             audio.export(temp_mp3_path, format="mp3")
             
             # Transcribe audio using MP3 file
@@ -792,36 +795,33 @@ async def process_video(
                 )
                 user_message = transcription
                 logger.info(f"Transcribed message: {user_message[:100]}...")
-                
+
         except Exception as e:
             logger.error(f"Error processing audio: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=f"Error processing audio: {str(e)}")
             
         finally:
             # Clean up temporary files
-            try:
-                if os.path.exists(temp_audio_path):
-                    os.remove(temp_audio_path)
-                    logger.info("Temporary WebM file removed")
-                if os.path.exists(temp_mp3_path):
-                    os.remove(temp_mp3_path)
-                    logger.info("Temporary MP3 file removed")
-            except Exception as e:
-                logger.error(f"Error cleaning up temporary files: {str(e)}")
-        
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+                logger.info("Temporary WebM file removed")
+            if temp_mp3_path and os.path.exists(temp_mp3_path):
+                os.remove(temp_mp3_path)
+                logger.info("Temporary MP3 file removed")
+
         # Get current question
         current_question = next(
             (q for q in all_questions if q.sequence_number == answered_questions + 1),
             None
         )
-        
+
         if current_question:
             # Create candidate response
             response = CandidateResponse(
                 interview_session_id=interview_session.id,
                 question_id=current_question.id,
                 response_text=user_message,
-                response_audio_url="",  # You could store the audio file if needed
+                response_audio_url="",
                 timestamp=datetime.utcnow()
             )
             db.add(response)
@@ -846,11 +846,16 @@ async def process_video(
                     CandidateResponse.interview_session_id == interview_session.id
                 ).all()
                 
-                interview_session.technical_score = sum(r.technical_accuracy or 0 for r in responses) / len(responses)
-                interview_session.communication_score = sum(r.clarity_score or 0 for r in responses) / len(responses)
-                interview_session.overall_score = (interview_session.technical_score + interview_session.communication_score) / 2
+                technical_scores = [r.technical_accuracy or 0 for r in responses]
+                clarity_scores = [r.clarity_score or 0 for r in responses]
                 
-                ai_response = "Thank you for completing the interview. Your responses have been recorded. We will review them and get back to you soon. Have a great day!"
+                interview_session.technical_score = sum(technical_scores) / len(responses)
+                interview_session.communication_score = sum(clarity_scores) / len(responses)
+                interview_session.overall_score = (
+                    interview_session.technical_score + interview_session.communication_score
+                ) / 2
+                
+                ai_response = "Thank you for completing the interview. Your responses have been recorded and will be reviewed. Have a great day!"
             else:
                 # Get next question
                 next_question = next(
@@ -861,39 +866,50 @@ async def process_video(
                     ai_response = f"Thank you for your response. Here's your next question: {next_question.question_text}"
                 else:
                     ai_response = "Thank you for your response."
-        else:
-            # If no current question (introduction phase)
-            ai_response = (
-                "Thank you for introducing yourself. Let's begin the interview. "
-                f"Here's your first question: {all_questions[0].question_text}"
+
+            db.commit()
+            logger.info(f"Processing completed, generating audio response: {ai_response[:100]}...")
+
+            # Generate audio response
+            try:
+                audio_output = text_to_speech(ai_response)
+            except Exception as e:
+                logger.error(f"Error generating audio response: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Error generating audio response"
+                )
+            
+            # Return audio response with headers
+            headers = {
+                "X-Interview-Status": interview_session.status,
+                "X-Total-Questions": str(len(all_questions)),
+                "X-Answered-Questions": str(answered_questions + 1),
+                "Access-Control-Expose-Headers": "X-Interview-Status, X-Total-Questions, X-Answered-Questions"
+            }
+            
+            return StreamingResponse(
+                iter([audio_output]),
+                media_type="audio/mpeg",
+                headers=headers
             )
-        
-        db.commit()
-        logger.info(f"Processing completed, generating audio response: {ai_response[:100]}...")
-        
-        # Generate audio response
-        audio_output = text_to_speech(ai_response)
-        
-        # Return audio response with headers
-        headers = {
-            "X-Interview-Status": interview_session.status,
-            "X-Total-Questions": str(len(all_questions)),
-            "X-Answered-Questions": str(answered_questions + 1),
-            "Access-Control-Expose-Headers": "X-Interview-Status, X-Total-Questions, X-Answered-Questions"
-        }
-        
-        return StreamingResponse(
-            iter([audio_output]),
-            media_type="audio/mpeg",
-            headers=headers
-        )
-        
-    except HTTPException as he:
-        raise he
+
+        else:
+            # Handle case when no current question is found
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid question sequence"
+            )
+            
+    except HTTPException:
+        raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Error processing video: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 @app.get("/interview/check-completed")
 async def check_completed_interviews(db: Session = Depends(get_db)):
@@ -1170,13 +1186,18 @@ def get_chat_response(session_id: str, user_message: str, job_context: str):
             detail="An unexpected error occurred while processing your request"
         )
 
-def text_to_speech(text):
+def text_to_speech(text: str) -> bytes:
+    """
+    Convert text to speech using ElevenLabs API
+    """
     url = "https://api.elevenlabs.io/v1/text-to-speech/pNInz6obpgDQGcFmaJgB"
+    
     headers = {
         "Accept": "audio/mpeg",
         "Content-Type": "application/json",
         "xi-api-key": ELEVENLABS_API_KEY
     }
+    
     data = {
         "text": text,
         "model_id": "eleven_monolingual_v1",
@@ -1187,10 +1208,10 @@ def text_to_speech(text):
             "use_speaker_boost": True
         }
     }
+
     try:
-        logger.info(f"Sending request to ElevenLabs API with text: {text[:100]}...")  # Log first 100 chars
+        logger.info(f"Sending request to ElevenLabs API with text: {text[:100]}...")
         response = requests.post(url, json=data, headers=headers)
-        logger.info(f"ElevenLabs API response status: {response.status_code}")
         
         if response.status_code == 200:
             audio_content = response.content
@@ -1199,15 +1220,25 @@ def text_to_speech(text):
         else:
             error_message = f"ElevenLabs API error: {response.status_code}, Response: {response.text}"
             logger.error(error_message)
-            raise Exception(error_message)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=error_message
+            )
+            
     except requests.RequestException as e:
         error_message = f"Network error in text-to-speech request: {str(e)}"
         logger.error(error_message)
-        raise HTTPException(status_code=500, detail=error_message)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_message
+        )
     except Exception as e:
         error_message = f"Unexpected error in text-to-speech: {str(e)}"
         logger.error(error_message)
-        raise HTTPException(status_code=500, detail=error_message)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_message
+        )
 
 def calculate_score(response):
     # Implement your scoring logic here
