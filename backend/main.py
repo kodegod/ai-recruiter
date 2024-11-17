@@ -37,6 +37,10 @@ load_dotenv()
 # Initialize FastAPI app
 app = FastAPI(title="AI Recruiter API")
 
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the AI Recruiter API"}
+
 # Update CORS settings for production
 app.add_middleware(
     CORSMiddleware,
