@@ -58,6 +58,11 @@ init_db(engine)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
+# OpenAI API Key
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY is not set in environment variables")
+
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY not found in environment variables")
 if not ELEVENLABS_API_KEY:
@@ -636,14 +641,9 @@ async def process_video(
             audio.export(temp_mp3_path, format="mp3")
             
             # Transcribe audio using MP3 file
-            with open(temp_mp3_path, "rb") as audio_file:
-                transcription = client.audio.transcriptions.create(
-                    file=(temp_mp3_path, audio_file, 'audio/mp3'),
-                    model="distil-whisper-large-v3-en",
-                    response_format="text"
-                )
-                user_message = transcription
-                logger.info(f"Transcribed message: {user_message[:100]}...")
+            # Transcribe audio using OpenAI Whisper API
+            user_message = await transcribe_audio(file)
+            logger.info(f"Transcribed message: {user_message[:100]}...")
                 
         except Exception as e:
             logger.error(f"Error processing audio: {str(e)}")
@@ -838,45 +838,64 @@ async def validate_interview_id(interview_id: str, db: Session = Depends(get_db)
 
 async def transcribe_audio(file):
     """
-    Transcribe audio using audio transcription service
+    Transcribe audio using OpenAI's Whisper API with plain text response handling.
     """
+    temp_file_path = None
     try:
         file_content = await file.read()
-        
-        # Create temporary file with correct extension
-        temp_file_path = f"temp_{uuid.uuid4()}.wav"  # Change to .wav
-        try:
-            # First save the file
-            with open(temp_file_path, "wb") as temp_file:
-                temp_file.write(file_content)
-            
-            # Open and transcribe the file
-            with open(temp_file_path, "rb") as audio_file:
-                # Create file tuple with filename and content
-                file_tuple = (os.path.basename(temp_file_path), audio_file, 'audio/wav')
-                
-                transcription = client.audio.transcriptions.create(
-                    file=file_tuple,
-                    model="distil-whisper-large-v3-en",
-                    response_format="text",
-                    language="en"
-                )
-                
+        temp_file_path = f"temp_{uuid.uuid4()}.mp3"
+
+        # Save the audio file temporarily
+        with open(temp_file_path, "wb") as temp_file:
+            temp_file.write(file_content)
+
+        # Prepare the request for OpenAI Whisper API
+        url = "https://api.openai.com/v1/audio/transcriptions"
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}"
+        }
+        files = {
+            "file": (temp_file_path, open(temp_file_path, "rb"), "audio/mpeg")
+        }
+        data = {
+            "model": "whisper-1",
+            "response_format": "text",  # Request plain text response
+            "language": "en"
+        }
+
+        # Make the request to OpenAI API
+        logger.info("Sending request to OpenAI Whisper API...")
+        response = requests.post(url, headers=headers, files=files, data=data, verify=False)
+
+        logger.info(f"OpenAI API response status: {response.status_code}")
+        logger.debug(f"OpenAI API response content: {response.text}")
+
+        # Check if the response is successful
+        if response.status_code == 200:
+            transcription = response.text.strip()  # Handle plain text response
+            if not transcription:
+                raise ValueError("Transcription is empty.")
             logger.info("Audio transcription successful")
             return transcription
+        else:
+            # Handle specific HTTP errors
+            if response.status_code == 401:
+                raise HTTPException(status_code=401, detail="Unauthorized: Check your OpenAI API key")
+            elif response.status_code == 429:
+                raise HTTPException(status_code=429, detail="Rate limit exceeded: Please try again later")
+            elif response.status_code == 500:
+                raise HTTPException(status_code=500, detail="Server error: OpenAI API is currently unavailable")
+            else:
+                raise HTTPException(status_code=response.status_code, detail=f"Transcription request failed: {response.text}")
 
-        finally:
-            # Clean up temp file
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-                logger.info("Temporary audio file removed")
-                
     except Exception as e:
         logger.error(f"Transcription error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error transcribing audio: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail="Error transcribing audio")
+    finally:
+        # Clean up the temporary file
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+            logger.info("Temporary audio file removed")
 
 def load_messages(session_id, role):
     session_file = f'sessions/{session_id}.json'
