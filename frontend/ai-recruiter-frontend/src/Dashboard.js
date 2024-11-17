@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Dashboard.css';
 
+const API_URL = process.env.REACT_APP_API_URL
+
 function Dashboard() {
   // State management
   const [jdFile, setJdFile] = useState(null);
@@ -28,7 +30,7 @@ function Dashboard() {
   // Function to check for completed interviews
   const checkCompletedInterviews = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/interview/check-completed');
+      const response = await axios.get('${API_URL}/interview/check-completed');
       setHasCompletedInterviews(response.data.has_completed_interviews);
     } catch (error) {
       console.error('Error checking completed interviews:', error);
@@ -82,7 +84,7 @@ function Dashboard() {
       jdFormData.append('file', jdFile);
 
       const jdResponse = await axios.post(
-        'http://localhost:8000/upload/jd',
+        '${API_URL}/upload/jd',
         jdFormData,
         {
           headers: {
@@ -100,7 +102,7 @@ function Dashboard() {
       resumeFormData.append('file', resumeFile);
 
       const resumeResponse = await axios.post(
-        'http://localhost:8000/upload/resume',
+        '${API_URL}/upload/resume',
         resumeFormData,
         {
           headers: {
@@ -119,7 +121,7 @@ function Dashboard() {
       formData.append('resume_id', resumeResponse.data.resume_id);
 
       const createInterviewResponse = await axios.post(
-        'http://localhost:8000/interview/create',
+        '${API_URL}/interview/create',
         formData,
         {
           headers: {
@@ -177,7 +179,7 @@ function Dashboard() {
       const question = questions.find(q => q.id === questionId);
       
       await axios.put(
-        `http://localhost:8000/interview/questions/${questionId}`,
+        `${API_URL}/interview/questions/${questionId}`,
         {
           question_text: question.question_text
         }
@@ -210,7 +212,7 @@ function Dashboard() {
       await Promise.all(savePromises);
       
       // Mark questions as confirmed
-      await axios.post(`http://localhost:8000/interview/${interviewId}/confirm`);
+      await axios.post(`${API_URL}/interview/${interviewId}/confirm`);
       
       setQuestionsConfirmed(true);
       setSuccess(`Questions confirmed! Use Interview ID: ${interviewId} for the video interview.`);
@@ -237,7 +239,7 @@ function Dashboard() {
       console.log('Searching for interview:', searchInterviewId);
 
       const response = await axios.get(
-        `http://localhost:8000/interview/${searchInterviewId.trim()}/details`,
+        `${API_URL}/interview/${searchInterviewId.trim()}/details`,
         {
           headers: {
             'Accept': 'application/json',

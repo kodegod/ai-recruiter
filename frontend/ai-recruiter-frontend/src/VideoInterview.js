@@ -4,6 +4,8 @@ import Webcam from 'react-webcam';
 import axios from 'axios';
 import './VideoInterview.css';
 
+const API_URL = process.env.REACT_APP_API_URL
+
 function VideoInterview() {
   const [isRecording, setIsRecording] = useState(false);
   const [interviewId, setInterviewId] = useState('');
@@ -27,7 +29,7 @@ function VideoInterview() {
 
     try {
       const response = await axios.get(
-        `http://localhost:8000/interview/validate/${interviewId.trim()}`
+        `${API_URL}/interview/validate/${interviewId.trim()}`
       );
 
       if (response.data.valid) {
@@ -79,7 +81,7 @@ function VideoInterview() {
       formData.append('interview_id', interviewId);
 
       const response = await axios.post(
-        'http://localhost:8000/talk-video',
+        '${API_URL}/talk-video',
         formData,
         {
           headers: {
