@@ -578,35 +578,60 @@ async def search_interviews(
     ]
 
 @app.post("/mock-interview")
-async def start_mock_interview(job_role: str = Form(...)):
+async def create_mock_interview(job_role: str = Form(...), db: Session = Depends(get_db)):
     """
-    Start a mock interview session for a specified job role.
+    Create a mock interview session for a specified job role
     """
     try:
-        system_prompt = f"""
-        You are an AI interviewer. Your role is to conduct a mock interview for the position of {job_role}.
-        Ask thoughtful questions related to the role and evaluate the candidate's responses.
-        """
-        # Save the session with the system prompt
+        # Log the job role for debugging
+        logger.info(f"Creating mock interview for job role: {job_role}")
+        
+        # Generate 5 mock interview questions
+        generated_questions = await generate_interview_questions(
+            jd_content=f"Job role: {job_role}",
+            resume_content="Candidate profile for a mock interview"
+        )
+
+        # Create a new interview session
         session_id = str(uuid.uuid4())
-        messages = [
-            {
-                "role": "system",
-                "content": system_prompt
-            }
-        ]
-        save_messages(session_id, messages)
+        interview_session = InterviewSession(
+            id=session_id,
+            jd_id=None,  # No JD for mock interviews
+            resume_id=None,  # No resume for mock interviews
+            status="ready",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.add(interview_session)
+        db.flush()
+
+        # Add generated questions to the session
+        for idx, question_data in enumerate(generated_questions, 1):
+            question = InterviewQuestion(
+                id=str(uuid.uuid4()),
+                interview_session_id=session_id,
+                question_text=question_data["question_text"],
+                question_type=question_data.get("question_type", "general"),
+                category=question_data.get("assesses", "general"),
+                sequence_number=idx,
+                is_generated=True,
+                expected_answer_keywords=question_data.get("key_points", ""),
+                scoring_rubric={"key_points": question_data.get("key_points", [])}
+            )
+            db.add(question)
+
+        db.commit()
 
         return {
-            "session_id": session_id,
-            "message": f"Mock interview for the role '{job_role}' has started. Use the session ID to continue."
+            "interview_id": session_id,
+            "job_role": job_role,
+            "questions": generated_questions,
+            "message": "Mock interview created successfully. Use the interview ID to start."
         }
     except Exception as e:
-        logger.error(f"Error starting mock interview: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to start the mock interview"
-        )
+        db.rollback()
+        logger.error(f"Error creating mock interview: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create mock interview")
 
 # Modified talk-video endpoint to use interview session
 @app.post("/talk-video")
