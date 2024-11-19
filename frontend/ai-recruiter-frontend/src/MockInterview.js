@@ -46,11 +46,10 @@ function MockInterview() {
   return (
     <div className="mock-interview">
       <h2>Mock Interview</h2>
-      
       {/* Alerts */}
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
-
+  
       {/* Input for Job Role */}
       <div className="input-group">
         <label>Job Role:</label>
@@ -62,7 +61,7 @@ function MockInterview() {
           disabled={isLoading}
         />
       </div>
-
+  
       <button
         onClick={handleCreateMockInterview}
         disabled={isLoading || !jobRole.trim()}
@@ -70,19 +69,13 @@ function MockInterview() {
       >
         {isLoading ? 'Creating...' : 'Create Mock Interview'}
       </button>
-
+  
       {/* Interview Details */}
       {interviewId && (
         <div className="interview-details">
           <h3>Mock Interview Created</h3>
           <p>Interview ID: <strong>{interviewId}</strong></p>
           <p>Use this ID in the Video Interview tab to start the interview.</p>
-          <h4>Questions:</h4>
-          <ul>
-            {questions.map((q, index) => (
-              <li key={index}>{q.question_text}</li>
-            ))}
-          </ul>
         </div>
       )}
     </div>

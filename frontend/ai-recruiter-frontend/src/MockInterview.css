@@ -1,56 +1,109 @@
 .mock-interview {
+    max-width: 600px;
+    margin: 0 auto;
     padding: 20px;
+    background-color: #f8fafc;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    font-family: Arial, sans-serif;
+  }
+  
+  .mock-interview h2 {
+    text-align: center;
+    margin-bottom: 20px;
+    font-size: 24px;
+    color: #3498db;
   }
   
   .input-group {
-    margin-bottom: 15px;
+    margin-bottom: 20px;
   }
   
   .input-group label {
     display: block;
+    font-size: 16px;
     font-weight: bold;
-    margin-bottom: 5px;
+    margin-bottom: 8px;
+    color: #555;
   }
   
-  .alert {
-    margin-bottom: 15px;
+  .input-group input {
+    width: 100%;
     padding: 10px;
-    border-radius: 5px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    transition: border-color 0.3s ease;
   }
   
-  .alert-error {
-    background-color: #ffdddd;
-    color: #d8000c;
-  }
-  
-  .alert-success {
-    background-color: #ddffdd;
-    color: #4caf50;
+  .input-group input:focus {
+    border-color: #007bff;
+    outline: none;
   }
   
   .create-button {
-    padding: 10px 20px;
+    width: 100%;
+    padding: 12px;
     background-color: #007bff;
     color: #fff;
+    font-size: 16px;
+    font-weight: bold;
     border: none;
-    border-radius: 5px;
+    border-radius: 4px;
     cursor: pointer;
+    transition: background-color 0.3s ease;
   }
   
   .create-button:disabled {
-    background-color: #a3d1ff;
+    background-color: #9ca3af;
     cursor: not-allowed;
+  }
+  
+  .create-button:hover:not(:disabled) {
+    background-color: #0056b3;
+  }
+  
+  .alert {
+    padding: 12px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  
+  .alert-error {
+    background-color: #ffe6e6;
+    color: #d9534f;
+    border: 1px solid #d9534f;
+  }
+  
+  .alert-success {
+    background-color: #e6ffe6;
+    color: #5cb85c;
+    border: 1px solid #5cb85c;
   }
   
   .interview-details {
     margin-top: 20px;
+    padding: 15px;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   }
   
   .interview-details h3 {
     margin-bottom: 10px;
+    font-size: 20px;
+    color: #333;
   }
   
-  .interview-details ul {
-    padding-left: 20px;
+  .interview-details p {
+    font-size: 14px;
+    color: #555;
+  }
+  
+  .interview-details strong {
+    font-weight: bold;
+    color: #333;
   }
   
