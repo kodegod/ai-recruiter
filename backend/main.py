@@ -580,23 +580,49 @@ async def search_interviews(
 @app.post("/mock-interview")
 async def create_mock_interview(job_role: str = Form(...), db: Session = Depends(get_db)):
     """
-    Create a mock interview session for a specified job role
+    Create a mock interview session for a specified job role.
     """
     try:
-        # Log the job role for debugging
         logger.info(f"Creating mock interview for job role: {job_role}")
         
-        # Generate 5 mock interview questions
-        generated_questions = await generate_interview_questions(
-            jd_content=f"Job role: {job_role}",
-            resume_content="Candidate profile for a mock interview"
+        # Generate a JD dynamically using AI
+        jd_prompt = f"""
+        Write a concise and detailed job description for the role of {job_role}.
+        Include key responsibilities, required skills, and qualifications.
+        """
+        
+        # Replace this with an actual AI call if necessary
+        jd_response = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": jd_prompt}],
+            temperature=0.7,
+            max_tokens=300
         )
+        jd_content = jd_response.choices[0].message.content.strip()
+        logger.info(f"Generated JD for role {job_role}: {jd_content[:100]}...")
+        
+        # Save the generated JD in the database
+        jd_id = str(uuid.uuid4())
+        job_description = JobDescription(
+            id=jd_id,
+            title=job_role,
+            company="Mock Company",
+            content=jd_content,
+            file_name=None,
+            file_type="generated",
+            requirements={"role": job_role}  # Include some metadata
+        )
+        db.add(job_description)
+        db.flush()  # Commit to generate ID
+
+        # Generate 5 mock interview questions
+        generated_questions = await generate_interview_questions(jd_content, resume_content="Mock Candidate")
 
         # Create a new interview session
         session_id = str(uuid.uuid4())
         interview_session = InterviewSession(
             id=session_id,
-            jd_id=None,  # No JD for mock interviews
+            jd_id=jd_id,
             resume_id=None,  # No resume for mock interviews
             status="ready",
             created_at=datetime.utcnow(),
@@ -625,6 +651,7 @@ async def create_mock_interview(job_role: str = Form(...), db: Session = Depends
         return {
             "interview_id": session_id,
             "job_role": job_role,
+            "jd_content": jd_content,
             "questions": generated_questions,
             "message": "Mock interview created successfully. Use the interview ID to start."
         }
@@ -632,6 +659,7 @@ async def create_mock_interview(job_role: str = Form(...), db: Session = Depends
         db.rollback()
         logger.error(f"Error creating mock interview: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to create mock interview")
+
 
 # Modified talk-video endpoint to use interview session
 @app.post("/talk-video")
