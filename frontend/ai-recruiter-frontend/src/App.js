@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Dashboard from './Dashboard';
 import VideoInterview from './VideoInterview';
+import MockInterview from './MockInterview'; // Import MockInterview component
 import './App.css';
 
 function App() {
@@ -22,12 +23,19 @@ function App() {
           >
             Video Interview
           </button>
+          <button 
+            className={`tab ${activeTab === 'mockinterview' ? 'active' : ''}`}
+            onClick={() => setActiveTab('mockinterview')}
+          >
+            Mock Interview
+          </button>
         </div>
       </div>
 
       <div className="tab-content">
         {activeTab === 'dashboard' && <Dashboard />}
         {activeTab === 'interview' && <VideoInterview />}
+        {activeTab === 'mockinterview' && <MockInterview />}
       </div>
     </div>
   );

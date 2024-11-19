@@ -577,6 +577,37 @@ async def search_interviews(
         for interview in interviews
     ]
 
+@app.post("/mock-interview")
+async def start_mock_interview(job_role: str = Form(...)):
+    """
+    Start a mock interview session for a specified job role.
+    """
+    try:
+        system_prompt = f"""
+        You are an AI interviewer. Your role is to conduct a mock interview for the position of {job_role}.
+        Ask thoughtful questions related to the role and evaluate the candidate's responses.
+        """
+        # Save the session with the system prompt
+        session_id = str(uuid.uuid4())
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt
+            }
+        ]
+        save_messages(session_id, messages)
+
+        return {
+            "session_id": session_id,
+            "message": f"Mock interview for the role '{job_role}' has started. Use the session ID to continue."
+        }
+    except Exception as e:
+        logger.error(f"Error starting mock interview: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to start the mock interview"
+        )
+
 # Modified talk-video endpoint to use interview session
 @app.post("/talk-video")
 async def process_video(
