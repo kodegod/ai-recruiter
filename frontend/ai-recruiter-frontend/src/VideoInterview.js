@@ -81,7 +81,7 @@ function VideoInterview() {
       formData.append('interview_id', interviewId);
 
       const response = await axios.post(
-        '${API_URL}/talk-video',
+        `${API_URL}/talk-video`,
         formData,
         {
           headers: {

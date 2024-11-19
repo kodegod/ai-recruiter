@@ -30,7 +30,7 @@ function Dashboard() {
   // Function to check for completed interviews
   const checkCompletedInterviews = async () => {
     try {
-      const response = await axios.get('${API_URL}/interview/check-completed');
+      const response = await axios.get(`${API_URL}/interview/check-completed`);
       setHasCompletedInterviews(response.data.has_completed_interviews);
     } catch (error) {
       console.error('Error checking completed interviews:', error);
@@ -84,7 +84,7 @@ function Dashboard() {
       jdFormData.append('file', jdFile);
 
       const jdResponse = await axios.post(
-        '${API_URL}/upload/jd',
+        `${API_URL}/upload/jd`,
         jdFormData,
         {
           headers: {
@@ -102,7 +102,7 @@ function Dashboard() {
       resumeFormData.append('file', resumeFile);
 
       const resumeResponse = await axios.post(
-        '${API_URL}/upload/resume',
+        `${API_URL}/upload/resume`,
         resumeFormData,
         {
           headers: {
@@ -121,7 +121,7 @@ function Dashboard() {
       formData.append('resume_id', resumeResponse.data.resume_id);
 
       const createInterviewResponse = await axios.post(
-        '${API_URL}/interview/create',
+        `${API_URL}/interview/create`,
         formData,
         {
           headers: {
