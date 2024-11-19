@@ -335,3 +335,21 @@ h2 {
     transform: scale(1);
   }
 }
+
+/* GitHub Logo Styles */
+.github-link {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+  transition: transform 0.3s ease;
+}
+
+.github-link:hover {
+  transform: scale(1.1);
+}
+
+.github-logo {
+  width: 100px;
+  height: 100px;
+}

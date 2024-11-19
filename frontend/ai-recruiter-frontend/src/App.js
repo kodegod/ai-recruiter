@@ -196,6 +196,19 @@ function App() {
               {activeTab === 'dashboard' && <Dashboard />}
               {activeTab === 'interview' && <VideoInterview />}
             </div>
+            {/* GitHub Logo */}
+            <a
+              href="https://github.com/kodegod/ai-recruiter"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="github-link"
+            >
+              <img
+                src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+                alt="GitHub Repository"
+                className="github-logo"
+              />
+            </a>
           </div>
         </>
       )}
