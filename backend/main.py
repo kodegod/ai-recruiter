@@ -577,6 +577,24 @@ async def search_interviews(
         for interview in interviews
     ]
 
+def get_or_create_mock_resume(db):
+    """
+    Retrieve or create a mock resume for mock interviews.
+    """
+    mock_resume = db.query(CandidateResume).filter(CandidateResume.candidate_name == "Mock Candidate").first()
+    if not mock_resume:
+        mock_resume = CandidateResume(
+            id=str(uuid.uuid4()),
+            candidate_name="Mock Candidate",
+            email="mock@candidate.com",
+            content="This is a placeholder resume for mock interviews.",
+            file_name="mock_resume.txt",
+            file_type="generated"
+        )
+        db.add(mock_resume)
+        db.commit()
+    return mock_resume
+
 @app.post("/mock-interview")
 async def create_mock_interview(job_role: str = Form(...), db: Session = Depends(get_db)):
     """
@@ -584,14 +602,12 @@ async def create_mock_interview(job_role: str = Form(...), db: Session = Depends
     """
     try:
         logger.info(f"Creating mock interview for job role: {job_role}")
-        
-        # Generate a JD dynamically using AI
+
+        # Generate a JD dynamically
         jd_prompt = f"""
         Write a concise and detailed job description for the role of {job_role}.
         Include key responsibilities, required skills, and qualifications.
         """
-        
-        # Replace this with an actual AI call if necessary
         jd_response = client.chat.completions.create(
             model="llama3-70b-8192",
             messages=[{"role": "user", "content": jd_prompt}],
@@ -600,8 +616,8 @@ async def create_mock_interview(job_role: str = Form(...), db: Session = Depends
         )
         jd_content = jd_response.choices[0].message.content.strip()
         logger.info(f"Generated JD for role {job_role}: {jd_content[:100]}...")
-        
-        # Save the generated JD in the database
+
+        # Save the generated JD
         jd_id = str(uuid.uuid4())
         job_description = JobDescription(
             id=jd_id,
@@ -609,21 +625,23 @@ async def create_mock_interview(job_role: str = Form(...), db: Session = Depends
             company="Mock Company",
             content=jd_content,
             file_name=None,
-            file_type="generated",
-            requirements={"role": job_role}  # Include some metadata
+            file_type="generated"
         )
         db.add(job_description)
-        db.flush()  # Commit to generate ID
+        db.flush()
 
-        # Generate 5 mock interview questions
+        # Generate mock questions
         generated_questions = await generate_interview_questions(jd_content, resume_content="Mock Candidate")
 
-        # Create a new interview session
+        # Get or create a mock resume
+        mock_resume = get_or_create_mock_resume(db)
+
+        # Create the interview session
         session_id = str(uuid.uuid4())
         interview_session = InterviewSession(
             id=session_id,
             jd_id=jd_id,
-            resume_id=None,  # No resume for mock interviews
+            resume_id=mock_resume.id,
             status="ready",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
@@ -631,7 +649,7 @@ async def create_mock_interview(job_role: str = Form(...), db: Session = Depends
         db.add(interview_session)
         db.flush()
 
-        # Add generated questions to the session
+        # Add generated questions
         for idx, question_data in enumerate(generated_questions, 1):
             question = InterviewQuestion(
                 id=str(uuid.uuid4()),
@@ -651,7 +669,6 @@ async def create_mock_interview(job_role: str = Form(...), db: Session = Depends
         return {
             "interview_id": session_id,
             "job_role": job_role,
-            "jd_content": jd_content,
             "questions": generated_questions,
             "message": "Mock interview created successfully. Use the interview ID to start."
         }
