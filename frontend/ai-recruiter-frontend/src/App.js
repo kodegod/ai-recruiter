@@ -151,7 +151,7 @@ function ThreeJsAnimation({ onAnimationComplete }) {
 
 function App() {
   const [showLandingAnimation, setShowLandingAnimation] = useState(true); // Track landing animation state
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('mockinterview');
 
   const handleAnimationComplete = () => {
     setShowLandingAnimation(false); // Hide landing animation after 2 seconds
