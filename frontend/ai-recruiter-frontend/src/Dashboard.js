@@ -141,10 +141,14 @@ function Dashboard() {
       
       if (error.response) {
         console.error('Error Response:', error.response.data);
+        console.error('Status:', error.response.status);
+        console.error('Headers:', error.response.headers);
         errorMessage = error.response.data.detail || error.response.data.message || errorMessage;
       } else if (error.request) {
+        console.error('Error Request:', error.request);
         errorMessage = 'No response from server. Please check your connection.';
       } else {
+        console.error('Error Message:', error.message);
         errorMessage = error.message;
       }
       
