@@ -1,6 +1,8 @@
-# AI Recruiter
+# [AI Recruiter](https://ai-recruiter-tau.vercel.app/)
 
-AI Recruiter is an intelligent platform that streamlines and enhances the hiring process by leveraging AI technologies to conduct mock interviews, create customized interviews for recruiters, and facilitate real-time video interviews with automated scoring and feedback.
+Live Link - https://ai-recruiter-tau.vercel.app/
+
+[AI Recruiter](https://ai-recruiter-tau.vercel.app/) is an intelligent platform that streamlines and enhances the hiring process by leveraging AI technologies to conduct mock interviews, create customized interviews for recruiters, and facilitate real-time video interviews with automated scoring and feedback.
 
 ## Overview
 
